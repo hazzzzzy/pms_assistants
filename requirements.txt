@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy
+pymysql
+
+langchain
+langchain-chroma
+langchain-deepseek
+langgraph
+langsmith
+langchain-huggingface
+sentence-transformers
+
+dotenv
