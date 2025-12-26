@@ -1,19 +1,16 @@
+import logging
 import time
 
 from langchain_core.tools import tool
-from sqlalchemy import text, create_engine
+from sqlalchemy import text
 
-from config.config import DB_USERNAME, DB_PASSWORD, DB_HOST, DB_PORT, DB_DATABASE
-from config.logger_config import setup_logging
-from utils.init_chroma import load_vectorstore
+from core.globals import GlobalVsTableSchema, GlobalVsQa, GlobalSQLEngine
 
-logger = setup_logging()
-
-engine = create_engine(f'mysql+pymysql://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}')
+logger = logging.getLogger(__name__)
 
 
 @tool
-def query_mysql(query: str):
+def agent_query_mysql(query: str):
     """
     执行SQL查询并返回结果，注意，只允许进行查询且使用此工具查询的表结构没有注释
     Args:
@@ -31,7 +28,7 @@ def query_mysql(query: str):
             return -2, f"执行失败: 不允许篡改数据"
 
         query_start_time = time.time()
-        with engine.connect() as conn:
+        with GlobalSQLEngine.connect() as conn:
             rows = conn.execute(text(query)).fetchall()
             query_end_time = time.time()
             logger.info(f'查询耗时 {(query_end_time - query_start_time):4f}s')
@@ -60,9 +57,11 @@ def agent_search_vector(query: str, k: int = 5, schema_min_score: float = 2.0, q
                 }
     """
     # logger.info(f"[工具调用] 正在检索向量数据库: {query}")
-    vs_schema = load_vectorstore('table_structure')
-    vs_qa = load_vectorstore('qa_sql')
-
+    vs_schema = GlobalVsTableSchema
+    vs_qa = GlobalVsQa
+    if vs_schema is None or vs_qa is None:
+        raise Exception('初始化未完成')
+    
     # schema_search_result = vs_schema.similarity_search_with_score(query, k=k)
     schema_search_result = vs_schema.max_marginal_relevance_search(query=query, k=k, fetch_k=20, lambda_mult=0.5)
     qa_search_result = vs_qa.similarity_search_with_score(query, k=k)
@@ -81,10 +80,9 @@ def agent_search_vector(query: str, k: int = 5, schema_min_score: float = 2.0, q
             qa_result += doc
     return {'qa_result': qa_result, 'schema_result': schema_result}
 
-
-if __name__ == '__main__':
-    # print(query_mysql('SELECT * FROM tb_admin_log LIMIT 5;'))
-    query = '明日预订情况'
-    vs_qa = load_vectorstore('table_structure')
-    qa_search_result = vs_qa.max_marginal_relevance_search(query=query, k=5, fetch_k=20, lambda_mult=0.5)
-    print(qa_search_result)
+# if __name__ == '__main__':
+# print(query_mysql('SELECT * FROM tb_admin_log LIMIT 5;'))
+# query = '明日预订情况'
+# vs_qa = chroma_instance.load_vectorstore('table_structure')
+# qa_search_result = vs_qa.max_marginal_relevance_search(query=query, k=5, fetch_k=20, lambda_mult=0.5)
+# print(qa_search_result)

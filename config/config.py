@@ -14,6 +14,7 @@ DB_DATABASE = os.getenv("DB_DATABASE", 'root')
 DB_USERNAME = os.getenv("DB_USERNAME", 'root')
 # 数据库密码
 DB_PASSWORD = os.getenv("DB_PASSWORD", 'root')
+DB_URL = f"mysql+pymysql://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}"
 
 #  ============ agent ============
 MODEL_PATH = abs_path("../models/bge-base-zh-v1.5")
@@ -22,5 +23,5 @@ CHROMA_DB_PATH = abs_path("../asset/chroma_db")
 # QA_FILE_PATH = '../asset/qa_sql.json'
 GEN_TRY_TIMES = 3
 
-DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY", 'sk-xxxxxx')
-LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", 'xxxxx')
+DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
