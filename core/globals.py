@@ -1,31 +1,23 @@
 import logging
 
+from fastapi import FastAPI
+
+from core.agent_context import AgentContext
+from core.agent_instance import AgentInstance
 from core.db import ChromaInstance, create_mysql_engine
 
 logger = logging.getLogger(__name__)
 
-# 1. 定义全局变量，初始为空
-GlobalVsTableSchema = None
-GlobalVsQa = None
-GlobalGraph = None
-GlobalSQLEngine = None
 
+def init_globals(app: FastAPI):
+    chroma_instance = ChromaInstance()
+    app.state.vs_schema = chroma_instance.load_vectorstore('table_structure')
+    app.state.vs_qa = chroma_instance.load_vectorstore('qa_sql')
+    logging.info(">>> 已加载 Chroma 数据库")
 
-# 2. 定义初始化函数 (组装逻辑都在这)
-def init_globals():
-    global GlobalVsTableSchema, GlobalVsQa, GlobalGraph, GlobalSQLEngine
+    app.state.mysql_engine = create_mysql_engine()
+    logging.info(">>> 已加载 MySQL Engine")
 
-    if GlobalVsTableSchema is None or GlobalVsQa is None:
-        chroma_instance = ChromaInstance()
-        GlobalVsTableSchema = chroma_instance.load_vectorstore('table_structure')
-        GlobalVsQa = chroma_instance.load_vectorstore('qa_sql')
-        logging.info(">>> 已加载 Chroma 数据库")
-
-    if GlobalSQLEngine is None:
-        GlobalSQLEngine = create_mysql_engine()
-        logging.info(">>> 已加载 MySQL Engine")
-
-    # if GlobalGraph is None:
-    #     agent_instance = AgentInstance()
-    #     GlobalGraph = agent_instance.build()
-    #     logging.info(">>> 已加载 Graph")
+    ctx = AgentContext(app, include_graph=False)
+    app.state.graph = AgentInstance().build(ctx)
+    logging.info(">>> 已加载 Graph")

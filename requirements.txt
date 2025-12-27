@@ -11,4 +11,4 @@ langsmith
 langchain-huggingface
 sentence-transformers
 
-dotenv
+pydantic-settings

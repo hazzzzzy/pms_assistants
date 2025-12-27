@@ -1,21 +1,21 @@
 from chromadb import Settings
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
-from config.config import CHROMA_DB_PATH, MODEL_PATH, DB_URL
+from config.config import settings
 
 
 class ChromaInstance:
     def __init__(self):
-        self.model = HuggingFaceEmbeddings(model_name=MODEL_PATH)
+        self.model = HuggingFaceEmbeddings(model_name=settings.MODEL_PATH)
 
     def load_vectorstore(self, collection_name):
         """为表结构数据创建向量存储"""
         # 加载JSON格式的表结构数据
         vectorstore = Chroma(
             embedding_function=self.model,
-            persist_directory=CHROMA_DB_PATH,
+            persist_directory=settings.CHROMA_DB_PATH,
             collection_name=collection_name,
             client_settings=Settings(anonymized_telemetry=False)
         )
@@ -34,6 +34,7 @@ class ChromaInstance:
 
 
 def create_mysql_engine():
+    DB_URL = f"mysql+pymysql://{settings.DB_USERNAME}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_DATABASE}"
     engine = create_engine(
         DB_URL,
         pool_pre_ping=True,  # 关键：自动重连
@@ -43,10 +44,15 @@ def create_mysql_engine():
     )
     return engine
 
-# if __name__ == '__main__':
-#     question = '昨日总收入多少'
-#     vs_qa = load_vectorstore('table_structure')
-#     qa_search_result = search_vector(vs_qa, question)
-#
-#     r = search_vector(vs_qa, question)
-#     print(r)
+
+if __name__ == '__main__':
+    question = '昨日餐券核销情况'
+    # vs_qa = load_vectorstore('table_structure')
+    # qa_search_result = search_vector(vs_qa, question)
+    #
+    # r = search_vector(vs_qa, question)
+    # print(r)
+    with create_mysql_engine().connect() as conn:
+        rows = conn.execute(text(question)).fetchall()
+        data = [dict(row._mapping) for row in rows]
+        print(data)

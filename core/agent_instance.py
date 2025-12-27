@@ -5,8 +5,8 @@ from langchain_deepseek import ChatDeepSeek
 from langgraph.graph import StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
 
-from utils.abs_path import abs_path
-from utils.agent_tools import agent_search_vector, agent_query_mysql
+from core.agent_context import AgentContext
+from core.agent_tools import build_agent_query_mysql, build_agent_search_vector
 
 
 class AgentState(TypedDict):
@@ -18,12 +18,16 @@ class AgentState(TypedDict):
 class AgentInstance:
     def __init__(self):
         self.llm = ChatDeepSeek(model="deepseek-chat", temperature=0.6)
-        self.tools = [agent_query_mysql, agent_search_vector]
-        self.llm_with_tools = self.llm.bind_tools(self.tools)
+        self.llm_with_tools = None
 
-    def agent_node(self, state: AgentState):
+    def init_tools_and_llm(self, ctx: AgentContext):
+        tools = [build_agent_query_mysql(ctx), build_agent_search_vector(ctx)]
+        self.llm_with_tools = self.llm.bind_tools(tools)
+        return tools
+
+    async def agent_node(self, state: AgentState):
         messages = state["messages"]
-        response = self.llm_with_tools.invoke(messages)
+        response = await self.llm_with_tools.ainvoke(messages)
         return {"messages": [response]}
 
     @staticmethod
@@ -56,13 +60,14 @@ class AgentInstance:
 
         return {}  # 什么都不做
 
-    def build(self):
+    def build(self, ctx: AgentContext):
+        tools = self.init_tools_and_llm(ctx)
         workflow = StateGraph(AgentState)
 
         # 添加节点
         workflow.add_node("rag_sql_agent", self.agent_node)
 
-        tool_node = ToolNode(self.tools)
+        tool_node = ToolNode(tools)
         workflow.add_node("tools", tool_node)
         # workflow.add_node("summary", summary_node)
 
@@ -82,12 +87,12 @@ class AgentInstance:
         app = workflow.compile()
         return app
 
-    def draw(self, file_name):
-        workflow = self.build()
-        img = workflow.get_graph().draw_mermaid_png()
-        img_path = abs_path(f"../asset/graph_pic/{file_name}.png")
-        with open(img_path, "wb") as f:
-            f.write(img)
+    # def draw(self, file_name):
+    #     workflow = self.build()
+    #     img = workflow.get_graph().draw_mermaid_png()
+    #     img_path = abs_path(f"../asset/graph_pic/{file_name}.png")
+    #     with open(img_path, "wb") as f:
+    #         f.write(img)
 
 
 if __name__ == '__main__':
