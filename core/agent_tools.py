@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 #     result:
 def build_agent_query_mysql(ctx: AgentContext):
     @tool
-    def agent_query_mysql(query: str):
+    async def agent_query_mysql(query: str):
         """
         这是一个mysql数据库检索工具，执行SQL查询并返回结果，注意，只允许进行查询且使用此工具查询的表结构没有注释
         Args:
@@ -31,14 +31,16 @@ def build_agent_query_mysql(ctx: AgentContext):
                 # if not query.startswith('SELECT') and not query.startswith('select'):
                 return -2, f"执行失败: 不允许篡改数据"
             query_start_time = time.time()
-            with ctx.mysql_engine.connect() as conn:
-                rows = conn.execute(text(query)).fetchall()
+            async with ctx.mysql_engine.connect() as conn:
+                result = await conn.execute(text(query))
+                rows = result.fetchall()
                 query_end_time = time.time()
                 logger.info(f'查询耗时 {(query_end_time - query_start_time):4f}s')
                 data = [dict(row._mapping) for row in rows]
             return 0, str(data)
         except Exception as e:
-            return -1, f"执行失败: {e}"
+            logger.error(f'sql执行异常：{e}')
+            return -1, f"执行失败: {str(e)}"
 
     return agent_query_mysql
 
@@ -88,10 +90,3 @@ def build_agent_search_vector(ctx: AgentContext):
         return {'qa_result': qa_result, 'schema_result': schema_result}
 
     return agent_search_vector
-
-# if __name__ == '__main__':
-# print(query_mysql('SELECT * FROM tb_admin_log LIMIT 5;'))
-# query = '明日预订情况'
-# vs_qa = chroma_instance.load_vectorstore('table_structure')
-# qa_search_result = vs_qa.max_marginal_relevance_search(query=query, k=5, fetch_k=20, lambda_mult=0.5)
-# print(qa_search_result)

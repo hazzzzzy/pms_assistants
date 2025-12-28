@@ -1,7 +1,7 @@
 from chromadb import Settings
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from sqlalchemy import create_engine, text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from config.config import settings
 
@@ -33,9 +33,9 @@ class ChromaInstance:
         return result
 
 
-def create_mysql_engine():
-    DB_URL = f"mysql+pymysql://{settings.DB_USERNAME}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_DATABASE}"
-    engine = create_engine(
+def create_async_mysql_engine() -> AsyncEngine:
+    DB_URL = f"mysql+aiomysql://{settings.DB_USERNAME}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_DATABASE}"
+    engine = create_async_engine(
         DB_URL,
         pool_pre_ping=True,  # 关键：自动重连
         pool_size=10,  # 连接池大小
@@ -43,16 +43,3 @@ def create_mysql_engine():
         echo=False  # 是否打印所有 SQL (生产环境关掉)
     )
     return engine
-
-
-if __name__ == '__main__':
-    question = '昨日餐券核销情况'
-    # vs_qa = load_vectorstore('table_structure')
-    # qa_search_result = search_vector(vs_qa, question)
-    #
-    # r = search_vector(vs_qa, question)
-    # print(r)
-    with create_mysql_engine().connect() as conn:
-        rows = conn.execute(text(question)).fetchall()
-        data = [dict(row._mapping) for row in rows]
-        print(data)

@@ -13,11 +13,11 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
     current_time = datetime.datetime.now().strftime('%Y-%m-%d')
     inputs = {
         "messages": [
-            SystemMessage(content=AGENT_SYSTEM_PROMPT.format(hotel_id)),
+            SystemMessage(id="sys_prompt", content=AGENT_SYSTEM_PROMPT.format(hotel_id)),
             HumanMessage(content=AGENT_USER_PROMPT.format(current_time, hotel_id, uid, question))
         ]
     }
-
+    ai_output = ''
     async for event in ctx.graph.astream_events(inputs, version="v2",
                                                 config={"recursion_limit": 50}):
         # 1. 捕获 Agent 的思考与行动
@@ -47,7 +47,6 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
         # logger.info(event)
         # --- 场景 1: 捕获 LLM 的流式吐字 (打字机效果) ---
         if kind == "on_chat_model_stream":
-            # 获取当前这一个 token (比如 "今", "天", "天", "气")
             chunk = event["data"]["chunk"]
 
             # 过滤掉工具调用的参数生成过程 (agent 思考参数时 content 为空)
@@ -59,11 +58,13 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
             chunk = event["data"]["output"]
             if chunk.content:
                 logger.info(f'[AI说]: {chunk.content}')
+                ai_output += chunk.content
         # --- 场景 2: 捕获工具调用 (可选，用于调试或前端展示 loading) ---
         elif kind == "on_tool_start":
             tool_name = event['name']
             tool_inputs = event['data'].get('input')
             logger.info(f"[正在调用工具]: {tool_name} 参数: {tool_inputs}")
+            yield f"data: [正在查询数据...]\n\n"
             # yield f"data: [正在查询数据...]\n\n"
 
         # --- 场景 3: 捕获工具返回结果 (可选) ---
@@ -72,5 +73,7 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
             output = str(event['data'].get('output'))
             logger.info(f"[工具返回]: {output[:100]}...")
 
-        # 流式结束
+    # 存储进数据库
+    # sss
+    # 流式结束
     yield "data: [DONE]\n\n"
