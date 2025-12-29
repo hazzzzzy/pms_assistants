@@ -1,6 +1,8 @@
 from chromadb import Settings
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import AsyncConnectionPool
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from config.config import settings
@@ -43,3 +45,26 @@ def create_async_mysql_engine() -> AsyncEngine:
         echo=False  # 是否打印所有 SQL (生产环境关掉)
     )
     return engine
+
+
+async def create_async_postgres_engine() -> AsyncPostgresSaver:
+    POSTGRES_DB_URL = f"postgresql://{settings.POSTGRES_DB_USERNAME}:{settings.POSTGRES_DB_PASSWORD}@{settings.POSTGRES_DB_HOST}:{settings.POSTGRES_DB_PORT}/{settings.POSTGRES_DB_DATABASE}"
+    connection_kwargs = {
+        "autocommit": True,
+        "prepare_threshold": 0,
+        "sslmode": "disable"  # <--- 关键修复：禁用 SSL，解决报错
+    }
+
+    # 创建连接池
+    pool = AsyncConnectionPool(
+        conninfo=POSTGRES_DB_URL,
+        max_size=20,
+        kwargs=connection_kwargs,
+        open=False)
+    await pool.open()
+    # 创建 Saver
+    check_pointer = AsyncPostgresSaver(pool)
+
+    # !!! 关键：首次启动自动建表 !!!
+    await check_pointer.setup()
+    return check_pointer

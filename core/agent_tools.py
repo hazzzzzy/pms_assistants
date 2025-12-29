@@ -83,6 +83,7 @@ def build_agent_search_vector(ctx: AgentContext):
             doc = f'表名：{doc.metadata['table_name']}\n表中文名：{doc.metadata['table_zh_name']}\n表结构：{doc.metadata['table_structure']}\n'
             schema_result += doc
         for doc, score in qa_search_result:
+            # logger.info([doc, score])
             if score <= qa_min_score:
                 # logger.info(doc.metadata['table_name'])
                 doc = f'该句sql的对应场景：{doc.page_content}\n备注：{doc.metadata['remark']}\nsql内容：{doc.metadata['a']}\n'

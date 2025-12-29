@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     DB_USERNAME: str = 'root'
     DB_PASSWORD: str = 'root'
 
+    # ============ POSTGRES ============
+    POSTGRES_DB_HOST: str = '127.0.0.1'
+    POSTGRES_DB_PORT: int = 5432
+    POSTGRES_DB_DATABASE: str = 'asd'
+    POSTGRES_DB_USERNAME: str = 'postgres'
+    POSTGRES_DB_PASSWORD: str = 'root'
+
     # ============ Agent / 路径配置 ============
     # 这里可以直接调用你的函数作为默认值
     MODEL_PATH: str = abs_path("../models/bge-base-zh-v1.5")
@@ -30,9 +37,8 @@ class Settings(BaseSettings):
     # 注意：LangChain 官方推荐用 LANGCHAIN_API_KEY 这个名字，虽然 LANGSMITH_API_KEY 也能用
     DEEPSEEK_API_KEY: str = None
     LANGSMITH_API_KEY: str | None = None
-    # 必须要有这个开关，否则光有 Key 也不生效
     LANGCHAIN_TRACING_V2: str = "true"
-    LANGCHAIN_PROJECT: str = "mulam_assistant"  # 给你的项目起个名字
+    LANGCHAIN_PROJECT: str = "mulam_assistant"
 
     model_config = SettingsConfigDict(
         env_file=".env",

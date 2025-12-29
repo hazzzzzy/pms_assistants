@@ -9,6 +9,11 @@ langchain-deepseek
 langgraph
 langsmith
 langchain-huggingface
+langgraph-checkpoint-postgres
+psycopg[binary]
+psycopg-pool
 sentence-transformers
 
 pydantic-settings
+
+tiktoken

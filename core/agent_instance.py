@@ -1,6 +1,7 @@
 from typing import Annotated, Literal, TypedDict
 
-from langchain_core.messages import BaseMessage, RemoveMessage
+import tiktoken
+from langchain_core.messages import BaseMessage, trim_messages
 from langchain_deepseek import ChatDeepSeek
 from langgraph.graph import StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
@@ -27,7 +28,29 @@ class AgentInstance:
 
     async def agent_node(self, state: AgentState):
         messages = state["messages"]
-        response = await self.llm_with_tools.ainvoke(messages)
+        # 定义修剪器
+        trimmer = trim_messages(
+            messages,
+            # 策略：保留最后面的消息
+            strategy="last",
+
+            # 关键技巧：我们将 Token 计数器定义为 "每条消息算 1 个 Token"
+            # 这样 max_tokens=10 就等于 "保留 10 条消息"
+            # 如果你想按真实 Token 限制（比如 4000 token），这里换成 llm.get_num_tokens
+            token_counter=self.count_tokens,
+            max_tokens=5000,
+
+            # 必须保留系统提示词！
+            include_system=True,
+
+            # 确保对话从 Human 开始（为了整洁，可选）
+            # start_on="human",
+
+            # 允许部分修剪（通常设为 False 以保证完整性）
+            allow_partial=False
+        )
+
+        response = await self.llm_with_tools.ainvoke(trimmer)
         return {"messages": [response]}
 
     @staticmethod
@@ -42,25 +65,7 @@ class AgentInstance:
         # 否则说明它觉得信息够了，已经生成了最终文本 -> 结束
         return "__end__"
 
-    @staticmethod
-    def memory_management_node(state: AgentState):
-        messages = state["messages"]
-
-        # 如果消息超过 50 条
-        if len(messages) > 50:
-            # 计算需要删除多少条（保留最新的 50 条）
-            # 注意：通常要保留第1条 SystemMessage，所以切片逻辑要小心
-            num_to_remove = len(messages) - 50
-
-            # 获取要删除的消息的 ID
-            ids_to_remove = [m.id for m in messages[:num_to_remove]]
-
-            # 返回 RemoveMessage 操作，LangGraph 会在 Checkpoint 中真正删除这些消息
-            return {"messages": [RemoveMessage(id=m_id) for m_id in ids_to_remove]}
-
-        return {}  # 什么都不做
-
-    def build(self, ctx: AgentContext):
+    def build(self, ctx: AgentContext, checkpointer=None):
         tools = self.init_tools_and_llm(ctx)
         workflow = StateGraph(AgentState)
 
@@ -84,16 +89,36 @@ class AgentInstance:
         workflow.add_edge("tools", "rag_sql_agent")
         # workflow.add_edge("summary", END)  # 答案生成完 -> 结束
 
-        app = workflow.compile()
+        app = workflow.compile(checkpointer=checkpointer)
         return app
 
+    # 1. 定义一个独立的计数函数 (放在类外面或者静态方法都可以)
+    @staticmethod
+    def count_tokens(messages: list[BaseMessage]) -> int:
+        """
+        使用 cl100k_base (GPT-4标准) 估算 DeepSeek 的 Token 数
+        """
+        encoding = tiktoken.get_encoding("cl100k_base")
+        num_tokens = 0
+        for m in messages:
+            # 每条消息的基础开销 (OpenAI 标准通常是 3 token: <|start|>, role, <|end|>)
+            num_tokens += 3
+
+            # 计算内容的 token
+            # 注意：这里要做个判空，因为有些 ToolMessage content 可能是 None
+            content = m.content or ""
+            num_tokens += len(encoding.encode(str(content)))
+
+            # 如果有 tool_calls (AI 正在呼叫工具)，这些也要算 token
+            if hasattr(m, "tool_calls") and m.tool_calls:
+                for tool_call in m.tool_calls:
+                    # 简单估算：函数名 + 参数 json 的长度
+                    num_tokens += len(encoding.encode(str(tool_call)))
+
+        return num_tokens
     # def draw(self, file_name):
     #     workflow = self.build()
     #     img = workflow.get_graph().draw_mermaid_png()
     #     img_path = abs_path(f"../asset/graph_pic/{file_name}.png")
     #     with open(img_path, "wb") as f:
     #         f.write(img)
-
-
-if __name__ == '__main__':
-    pass

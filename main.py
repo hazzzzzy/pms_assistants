@@ -1,5 +1,7 @@
 import logging
 
+from starlette.middleware.cors import CORSMiddleware
+
 from config.logger_config import init_logging_config
 from core.globals import init_globals
 from router import register_routers
@@ -19,7 +21,8 @@ async def lifespan(app: FastAPI):
     # [启动阶段]
     # 调用组装函数，初始化所有全局变量
     register_exception_handler(app)
-    init_globals(app)
+    await init_globals(app)
+
     register_routers(app)
     yield
     # [关闭阶段]
@@ -33,3 +36,11 @@ app = FastAPI(title='mulam助手API文档',
               """,
               version='0.9.0',
               lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    # allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
