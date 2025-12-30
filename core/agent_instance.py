@@ -2,14 +2,14 @@ import logging
 from typing import Annotated, Literal, TypedDict
 
 import tiktoken
-from langchain_core.messages import BaseMessage, trim_messages, SystemMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, trim_messages
 from langchain_deepseek import ChatDeepSeek
 from langgraph.constants import END
 from langgraph.graph import StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
 
 from core.agent_context import AgentContext
-from core.agent_prompt import ROUTER_PROMPT, CHAT_PROMPT, AGENT_SYSTEM_PROMPT
+from core.agent_prompt import AGENT_SYSTEM_PROMPT, CHAT_PROMPT, ROUTER_PROMPT
 from core.agent_tools import build_agent_query_mysql, build_agent_search_vector
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class AgentInstance:
         return tools
 
     def use_trimmer(self, messages):
-        question = ''
+        question = None
         for msg in reversed(messages):
             if isinstance(msg, HumanMessage):
                 question = msg
@@ -52,7 +52,7 @@ class AgentInstance:
             allow_partial=False
         )
         if question not in trimmed_messages:
-            return question + trimmed_messages
+            return [question] + trimmed_messages
         else:
             return trimmed_messages
 
@@ -62,7 +62,7 @@ class AgentInstance:
 
         input_message = [SystemMessage(content=CHAT_PROMPT)] + clean_messages
         input_message = self.use_trimmer(input_message)
-        # logger.info(input_message)
+        self.print_message(input_message)
         response = await self.llm.ainvoke(input_message)
         return {"messages": [response]}
 
