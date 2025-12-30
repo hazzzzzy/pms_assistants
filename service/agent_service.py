@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from core.agent_context import AgentContext
 from core.agent_prompt import AGENT_SYSTEM_PROMPT, AGENT_USER_PROMPT
+from utils.abs_path import abs_path
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
             'thread_id': thread_id
         },
         "recursion_limit": 50,
-
     }
     ai_output = ''
     try:
@@ -52,20 +52,24 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
             #     message = event["tools"]["messages"][0]
             #     logger.info(f"[工具返回]: {message.content[:200]}...")  # 只打印前200字防止刷屏
             kind = event["event"]
-            # logger.info(event)
+            # if kind != "on_chat_model_stream":
+            #     logger.info(event)
             # --- 场景 1: 捕获 LLM 的流式吐字 (打字机效果) ---
             if kind == "on_chat_model_stream":
                 chunk = event["data"]["chunk"]
-
+                langgraph_node = event["metadata"]["langgraph_node"]
+                # logger.info(chunk)
                 # 过滤掉工具调用的参数生成过程 (agent 思考参数时 content 为空)
-                if chunk.content:
+                if chunk.content and langgraph_node != 'router':
+                    # if chunk.content:
                     # 直接 yield 纯文本，由 FastAPI 的 EventSourceResponse 自动封装格式
                     # 或者手动封装成 data: {char}\n\n
                     payload = json.dumps({"text": chunk.content}, ensure_ascii=False)
                     yield f"data: {payload}\n\n"
             elif kind == 'on_chat_model_end':
                 chunk = event["data"]["output"]
-                if chunk.content:
+                langgraph_node = event["metadata"]["langgraph_node"]
+                if chunk.content and langgraph_node != 'router':
                     logger.info(f'[AI说]: {chunk.content}')
                     ai_output += chunk.content
             # --- 场景 2: 捕获工具调用 (可选，用于调试或前端展示 loading) ---
@@ -83,9 +87,17 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
 
     except Exception as e:
         # yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        logger.error(e)
         yield f"data: {json.dumps({'text': str(e)})}\n\n"
     finally:
         # 流式结束
         yield "data: [DONE]\n\n"
     # 存储进数据库
     # sss
+
+
+async def draw(ctx: AgentContext, file_name):
+    img = ctx.graph.get_graph().draw_mermaid_png()
+    img_path = abs_path(f"../asset/graph_pic/{file_name}.png")
+    with open(img_path, "wb") as f:
+        f.write(img)

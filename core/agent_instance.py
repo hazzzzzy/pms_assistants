@@ -1,19 +1,25 @@
+import logging
 from typing import Annotated, Literal, TypedDict
 
 import tiktoken
-from langchain_core.messages import BaseMessage, trim_messages
+from langchain_core.messages import BaseMessage, trim_messages, SystemMessage, HumanMessage
 from langchain_deepseek import ChatDeepSeek
+from langgraph.constants import END
 from langgraph.graph import StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
 
 from core.agent_context import AgentContext
+from core.agent_prompt import ROUTER_PROMPT, CHAT_PROMPT, AGENT_SYSTEM_PROMPT
 from core.agent_tools import build_agent_query_mysql, build_agent_search_vector
+
+logger = logging.getLogger(__name__)
 
 
 class AgentState(TypedDict):
     # add_messages 是 LangGraph 的黑魔法：
     # 当节点返回新的 message 时，它不是覆盖，而是 append（追加）到列表里
     messages: Annotated[list[BaseMessage], add_messages]
+    next_node: str
 
 
 class AgentInstance:
@@ -26,31 +32,59 @@ class AgentInstance:
         self.llm_with_tools = self.llm.bind_tools(tools)
         return tools
 
-    async def agent_node(self, state: AgentState):
-        messages = state["messages"]
-        # 定义修剪器
-        trimmer = trim_messages(
+    def use_trimmer(self, messages):
+        question = ''
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                question = msg
+                break
+        trimmed_messages = trim_messages(
             messages,
             # 策略：保留最后面的消息
             strategy="last",
-
-            # 关键技巧：我们将 Token 计数器定义为 "每条消息算 1 个 Token"
-            # 这样 max_tokens=10 就等于 "保留 10 条消息"
-            # 如果你想按真实 Token 限制（比如 4000 token），这里换成 llm.get_num_tokens
             token_counter=self.count_tokens,
-            max_tokens=5000,
-
-            # 必须保留系统提示词！
+            # token_counter=len,
+            max_tokens=6000,
             include_system=True,
-
-            # 确保对话从 Human 开始（为了整洁，可选）
+            # 确保对话从 Human 开始
             # start_on="human",
-
             # 允许部分修剪（通常设为 False 以保证完整性）
             allow_partial=False
         )
+        if question not in trimmed_messages:
+            return question + trimmed_messages
+        else:
+            return trimmed_messages
 
-        response = await self.llm_with_tools.ainvoke(trimmer)
+    async def chat_node(self, state: AgentState):
+        messages = state['messages']
+        clean_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+
+        input_message = [SystemMessage(content=CHAT_PROMPT)] + clean_messages
+        input_message = self.use_trimmer(input_message)
+        # logger.info(input_message)
+        response = await self.llm.ainvoke(input_message)
+        return {"messages": [response]}
+
+    async def router_node(self, state: AgentState):
+        messages = state['messages']
+        question = messages[-1]
+        input_message = [SystemMessage(content=ROUTER_PROMPT), question]
+        response = await self.llm.ainvoke(input_message)
+        result = response.content.strip().lower()
+        if "sql" in result:
+            return {"next_node": "rag_sql_agent"}
+        else:
+            return {"next_node": "chat_agent"}
+
+    async def agent_node(self, state: AgentState):
+        messages = state["messages"]
+        clean_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+
+        input_message = [SystemMessage(content=AGENT_SYSTEM_PROMPT)] + clean_messages
+        input_message = self.use_trimmer(input_message)
+        self.print_message(input_message)
+        response = await self.llm_with_tools.ainvoke(input_message)
         return {"messages": [response]}
 
     @staticmethod
@@ -71,13 +105,24 @@ class AgentInstance:
 
         # 添加节点
         workflow.add_node("rag_sql_agent", self.agent_node)
+        workflow.add_node("chat_agent", self.chat_node)
+        workflow.add_node("router", self.router_node)
 
         tool_node = ToolNode(tools)
         workflow.add_node("tools", tool_node)
-        # workflow.add_node("summary", summary_node)
 
         # 设置入口
-        workflow.set_entry_point("rag_sql_agent")
+        workflow.set_entry_point("router")
+
+        # 条件边：根据 router 的结果跳转
+        workflow.add_conditional_edges(
+            "router",
+            lambda state: state["next_node"],  # 读取 next_node 字段
+            {
+                "rag_sql_agent": "rag_sql_agent",
+                "chat_agent": "chat_agent"
+            }
+        )
 
         # 添加条件边：AI 思考完后，决定是去查库(tools)还是结束(END)
         workflow.add_conditional_edges(
@@ -87,7 +132,7 @@ class AgentInstance:
 
         # 添加普通边：工具查完后，必须把结果扔回给 AI，让它继续思考
         workflow.add_edge("tools", "rag_sql_agent")
-        # workflow.add_edge("summary", END)  # 答案生成完 -> 结束
+        workflow.add_edge("chat_agent", END)  # 答案生成完 -> 结束
 
         app = workflow.compile(checkpointer=checkpointer)
         return app
@@ -116,9 +161,18 @@ class AgentInstance:
                     num_tokens += len(encoding.encode(str(tool_call)))
 
         return num_tokens
-    # def draw(self, file_name):
-    #     workflow = self.build()
-    #     img = workflow.get_graph().draw_mermaid_png()
-    #     img_path = abs_path(f"../asset/graph_pic/{file_name}.png")
-    #     with open(img_path, "wb") as f:
-    #         f.write(img)
+
+    @staticmethod
+    def print_message(msg_list):
+        for i, msg in enumerate(msg_list):
+            # 1. 获取消息类型
+            # msg.type 是 LangChain 统一的字符串标识 (如 'human', 'system', 'ai', 'tool')
+            # type(msg).__name__ 是类名 (如 'HumanMessage')
+            msg_type = msg.type.upper()
+            logger.info(f'*****************[{i + 1}]  {msg_type}*******************')
+
+            # 2. 获取内容
+            content = msg.content
+
+            # 打印
+            logger.info(f"{content[:100]}")

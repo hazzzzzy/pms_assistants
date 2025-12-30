@@ -18,9 +18,10 @@ async def init_globals(app: FastAPI):
     app.state.mysql_engine = create_async_mysql_engine()
     logging.info(">>> 已加载 MySQL Engine")
 
-    app.state.postgres_engine = await create_async_postgres_engine()
+    checkpointer = await create_async_postgres_engine()
+    app.state.postgres_engine = checkpointer
     logging.info(">>> 已加载 POSTGRES CHECKPOINT SAVER")
 
     ctx = AgentContext(app, include_graph=False)
-    app.state.graph = AgentInstance().build(ctx)
+    app.state.graph = AgentInstance().build(ctx, checkpointer)
     logging.info(">>> 已加载 Graph")
