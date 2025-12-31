@@ -32,5 +32,4 @@ async def chat(req: ChatRequest,
 async def chat(request: Request, req: DrawRequest):
     context = AgentContext(request.app, include_graph=True)
     await agent_service.draw(context, req.file_name)
-    #
     return R.success()

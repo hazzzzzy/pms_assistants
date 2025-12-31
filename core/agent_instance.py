@@ -2,7 +2,7 @@ import logging
 from typing import Annotated, Literal, TypedDict
 
 import tiktoken
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, trim_messages
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, trim_messages, ToolMessage, AIMessage
 from langchain_deepseek import ChatDeepSeek
 from langgraph.constants import END
 from langgraph.graph import StateGraph, add_messages
@@ -24,7 +24,7 @@ class AgentState(TypedDict):
 
 class AgentInstance:
     def __init__(self):
-        self.llm = ChatDeepSeek(model="deepseek-chat", temperature=0.6)
+        self.llm = ChatDeepSeek(model="deepseek-chat", temperature=0.1)
         self.llm_with_tools = None
 
     def init_tools_and_llm(self, ctx: AgentContext):
@@ -33,11 +33,14 @@ class AgentInstance:
         return tools
 
     def use_trimmer(self, messages):
+        system_message = [m for m in messages if isinstance(m, SystemMessage)]
+
         question = None
         for msg in reversed(messages):
             if isinstance(msg, HumanMessage):
                 question = msg
                 break
+
         trimmed_messages = trim_messages(
             messages,
             # 策略：保留最后面的消息
@@ -51,10 +54,23 @@ class AgentInstance:
             # 允许部分修剪（通常设为 False 以保证完整性）
             allow_partial=False
         )
-        if question not in trimmed_messages:
-            return [question] + trimmed_messages
+
+        valid_messages = []
+        for i, msg in enumerate(trimmed_messages):
+            if isinstance(msg, ToolMessage):
+                # tool_call_id = msg.tool_call_id
+                if i - 1 > 0 and isinstance(trimmed_messages[i - 1], AIMessage) and trimmed_messages[i - 1].tool_calls:
+                    # or trimmed_messages[i - 1].tool_calls[0].get('id') != tool_call_id):
+                    valid_messages.append(msg)
+            else:
+                valid_messages.append(msg)
+
+        other_messages = [m for m in valid_messages if not isinstance(m, SystemMessage)]
+        if question and question not in valid_messages:
+            final_messages = [question] + other_messages
         else:
-            return trimmed_messages
+            final_messages = other_messages
+        return system_message + final_messages
 
     async def chat_node(self, state: AgentState):
         messages = state['messages']
@@ -62,8 +78,9 @@ class AgentInstance:
 
         input_message = [SystemMessage(content=CHAT_PROMPT)] + clean_messages
         input_message = self.use_trimmer(input_message)
-        self.print_message(input_message)
+
         response = await self.llm.ainvoke(input_message)
+        self.print_message(input_message + [response])
         return {"messages": [response]}
 
     async def router_node(self, state: AgentState):
@@ -83,8 +100,10 @@ class AgentInstance:
 
         input_message = [SystemMessage(content=AGENT_SYSTEM_PROMPT)] + clean_messages
         input_message = self.use_trimmer(input_message)
-        self.print_message(input_message)
         response = await self.llm_with_tools.ainvoke(input_message)
+        if response.response_metadata.get('finish_reason') == 'stop':
+            self.print_message(input_message + [response])
+
         return {"messages": [response]}
 
     @staticmethod
@@ -164,15 +183,21 @@ class AgentInstance:
 
     @staticmethod
     def print_message(msg_list):
+        # if len(msg_list) != 0:
+        #     last_msg = msg_list[-1]
+        #     logger.info(f'11111111111{last_msg}')
+        #     if isinstance(last_msg, AIMessage):
+        #         if last_msg.response_metadata.get('finish_reason') == 'stop':
         for i, msg in enumerate(msg_list):
-            # 1. 获取消息类型
-            # msg.type 是 LangChain 统一的字符串标识 (如 'human', 'system', 'ai', 'tool')
-            # type(msg).__name__ 是类名 (如 'HumanMessage')
             msg_type = msg.type.upper()
             logger.info(f'*****************[{i + 1}]  {msg_type}*******************')
 
-            # 2. 获取内容
             content = msg.content
-
-            # 打印
-            logger.info(f"{content[:100]}")
+            tool_calls = hasattr(msg, "tool_calls")
+            if isinstance(msg, AIMessage):
+                if len(content) > 1:
+                    logger.info(content)
+                if tool_calls and len(msg.tool_calls) > 0:
+                    logger.info(f"调用工具{msg.tool_calls[0]['name']}: {msg.tool_calls}")
+            else:
+                logger.info(f"{content[:100]}...")

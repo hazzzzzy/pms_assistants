@@ -3,7 +3,7 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, async_sessionmaker, AsyncSession
 
 from config.config import settings
 
@@ -68,3 +68,15 @@ async def create_async_postgres_engine() -> AsyncPostgresSaver:
     # !!! 关键：首次启动自动建表 !!!
     await check_pointer.setup()
     return check_pointer
+
+
+def create_async_session_maker(engine):
+    # 3. 创建 Session 工厂 (Factory)
+    # 以前 Flask 里的 db.session 是个全局代理，自动帮你管理。
+    # 现在你需要自己造一个“生产 Session 的工厂”，每次请求都要从这里拿一个新的 Session。
+    AsyncSessionLocal = async_sessionmaker(
+        bind=engine,  # 绑定上面的引擎
+        class_=AsyncSession,  # 指定生成的 Session 类型是异步的
+        expire_on_commit=False  # 【关键点】提交后不立刻过期
+    )
+    return AsyncSessionLocal

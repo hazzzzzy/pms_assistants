@@ -30,7 +30,7 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
     async for event in ctx.graph.astream_events(inputs, version="v2", config=agent_config):
         kind = event["event"]
         # if kind != "on_chat_model_stream":
-        #     logger.info(event)
+        # logger.info(event)
         # --- 场景 1: 捕获 LLM 的流式吐字 (打字机效果) ---
         if kind == "on_chat_model_stream":
             chunk = event["data"]["chunk"]
@@ -68,7 +68,7 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
         #     yield f"data: {json.dumps({'text': str(e)})}\n\n"
         # finally:
         # 流式结束
-        yield "data: [DONE]\n\n"
+    yield "data: [DONE]\n\n"
     # 存储进数据库
     # sss
 
