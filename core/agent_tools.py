@@ -5,6 +5,7 @@ from langchain_core.tools import tool
 from sqlalchemy import text
 
 from core.agent_context import AgentContext
+from core.db import pms_mysql_engine
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def build_agent_query_mysql(ctx: AgentContext):
                 # if not query.startswith('SELECT') and not query.startswith('select'):
                 return -2, f"执行失败: 不允许篡改数据"
             query_start_time = time.time()
-            async with ctx.mysql_engine.connect() as conn:
+            async with pms_mysql_engine.connect() as conn:
                 result = await conn.execute(text(query))
                 rows = result.fetchall()
                 query_end_time = time.time()

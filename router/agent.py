@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.agent_context import AgentContext
+from schemas.agent import HistoryQueryRequest
 from service import agent_service
 from utils.R import R
 
@@ -16,6 +17,12 @@ class ChatRequest(BaseModel):
 
 class DrawRequest(BaseModel):
     file_name: str
+
+
+class HistoryRequest(BaseModel):
+    limit: int = 10
+    page: int = 1
+    hid: int | None = None
 
 
 @agent_router.post('/chat')
@@ -33,3 +40,9 @@ async def chat(request: Request, req: DrawRequest):
     context = AgentContext(request.app, include_graph=True)
     await agent_service.draw(context, req.file_name)
     return R.success()
+
+
+@agent_router.post('/get_history')
+async def get_history(req: HistoryQueryRequest):
+    data = await agent_service.get_history_from_mysql(limit=req.limit, page=req.page, hid=req.hid)
+    return R.success(data)

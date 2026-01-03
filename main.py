@@ -3,6 +3,7 @@ import logging
 from starlette.middleware.cors import CORSMiddleware
 
 from config.logger_config import init_logging_config
+from core.db import pms_mysql_engine
 from core.globals import init_globals
 from router import register_routers
 from utils.custom_exception import register_exception_handler
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
 
     register_routers(app)
     yield
+    await pms_mysql_engine.dispose()
     # [关闭阶段]
     logging.info("资源释放...")
 
@@ -41,6 +43,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=['*'],
     # allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTION", ],
     allow_headers=["*"],
 )

@@ -11,13 +11,21 @@ class Settings(BaseSettings):
     # 如果想给默认值，写成 SECRET_KEY: str = "default_key"
     SECRET_KEY: str = 'default_key'
 
-    # ============ MySQL ============
+    # ============ PMS ============
     # Pydantic 会自动读取环境变量中的 DB_HOST，读不到则使用默认值
-    DB_HOST: str = '127.0.0.1'
-    DB_PORT: int = 3306  # 自动将环境变量里的字符串 "3306" 转为 数字 3306
-    DB_DATABASE: str = 'root'
-    DB_USERNAME: str = 'root'
-    DB_PASSWORD: str = 'root'
+    PMS_DB_HOST: str = '127.0.0.1'
+    PMS_DB_PORT: int = 3306  # 自动将环境变量里的字符串 "3306" 转为 数字 3306
+    PMS_DB_DATABASE: str = 'root'
+    PMS_DB_USERNAME: str = 'root'
+    PMS_DB_PASSWORD: str = 'root'
+
+    # ============ ASSISTANTS ============
+    # Pydantic 会自动读取环境变量中的 DB_HOST，读不到则使用默认值
+    ASSISTANTS_DB_HOST: str = '127.0.0.1'
+    ASSISTANTS_DB_PORT: int = 3306  # 自动将环境变量里的字符串 "3306" 转为 数字 3306
+    ASSISTANTS_DB_DATABASE: str = 'root'
+    ASSISTANTS_DB_USERNAME: str = 'root'
+    ASSISTANTS_DB_PASSWORD: str = 'root'
 
     # ============ POSTGRES ============
     POSTGRES_DB_HOST: str = '127.0.0.1'
