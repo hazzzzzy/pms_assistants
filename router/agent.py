@@ -1,28 +1,11 @@
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, Request, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from core.agent_context import AgentContext
-from schemas.agent import HistoryQueryRequest
+from schemas.agent import ChatRequest, DrawRequest, HistoryRequest, HistoryFeedRequest
 from service import agent_service
-from utils.R import R
 
 agent_router = APIRouter(prefix="/agent", tags=["agent"])
-
-
-class ChatRequest(BaseModel):
-    question: str
-    thread_id: str
-
-
-class DrawRequest(BaseModel):
-    file_name: str
-
-
-class HistoryRequest(BaseModel):
-    limit: int = 10
-    page: int = 1
-    hid: int | None = None
 
 
 @agent_router.post('/chat')
@@ -38,11 +21,11 @@ async def chat(req: ChatRequest,
 @agent_router.post('/draw')
 async def chat(request: Request, req: DrawRequest):
     context = AgentContext(request.app, include_graph=True)
-    await agent_service.draw(context, req.file_name)
-    return R.success()
+    return await agent_service.draw(context, req.file_name)
 
 
-@agent_router.post('/get_history')
-async def get_history(req: HistoryQueryRequest):
-    data = await agent_service.get_history_from_mysql(limit=req.limit, page=req.page, hid=req.hid)
-    return R.success(data)
+@agent_router.get('/get_history')
+async def get_history(req: HistoryRequest = Depends()):
+    if isinstance(req, HistoryFeedRequest):
+        return await agent_service.get_history_feed(limit=req.limit, history_id=req.history_id)
+    return await agent_service.get_history_table(limit=req.limit, page=req.page)

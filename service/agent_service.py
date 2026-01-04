@@ -9,6 +9,7 @@ from core.agent_context import AgentContext
 from core.agent_prompt import AGENT_SYSTEM_PROMPT, AGENT_USER_PROMPT
 from core.db import db_session
 from db_models.models import ChatHistory
+from utils.R import R
 from utils.abs_path import abs_path
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ async def draw(ctx: AgentContext, file_name):
     img_path = abs_path(f"../asset/graph_pic/{file_name}.png")
     with open(img_path, "wb") as f:
         f.write(img)
+    return R.success()
 
 
 async def save_history_to_mysql(question: str, answer: str, uid: str):
@@ -103,20 +105,33 @@ async def save_history_to_mysql(question: str, answer: str, uid: str):
         # room = result.scalars().one_or_none()
 
 
-async def get_history_from_mysql(hid: int | None = None, limit: int = 10, page: int = 1):
+async def get_history_feed(history_id: int | None = None, limit: int = 10):
     async with db_session() as session:
         history_stmt = select(ChatHistory).order_by(desc(ChatHistory.created_at), desc(ChatHistory.id)).limit(limit)
-        if hid:
-            history_stmt = history_stmt.where(ChatHistory.id < hid)
-        else:
-            history_stmt = history_stmt.offset(limit * (page - 1))
+        if history_id:
+            history_stmt = history_stmt.where(ChatHistory.id < history_id)
+        history = await session.execute(history_stmt)
+        history = history.scalars().all()
+
+        return R.success(
+            {
+                'history': history,
+            }
+        )
+
+
+async def get_history_table(limit: int = 10, page: int = 1):
+    async with db_session() as session:
+        history_stmt = select(ChatHistory).order_by(desc(ChatHistory.created_at), desc(ChatHistory.id)).limit(limit).offset(limit * (page - 1))
         history = await session.execute(history_stmt)
         history = history.scalars().all()
 
         total_count_stmt = select(func.count()).select_from(ChatHistory)
         total_count = await session.execute(total_count_stmt)
         total_count = total_count.scalar()
-        return {
-            'history': history,
-            'count': total_count
-        }
+        return R.success(
+            {
+                'history': history,
+                'count': total_count
+            }
+        )
