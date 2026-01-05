@@ -1,4 +1,3 @@
-import logging
 from contextlib import asynccontextmanager
 
 from chromadb import Settings
@@ -10,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from config.config import settings
 
-logger = logging.getLogger(__name__)
+
+# logger = logging.getLogger(__name__)
 
 
 class ChromaInstance:
@@ -58,6 +58,9 @@ async def create_async_postgres_engine() -> AsyncPostgresSaver:
     # 创建 Saver
     check_pointer = AsyncPostgresSaver(pool)
 
+    # 【关键修改】把 pool 绑在 check_pointer 上，
+    check_pointer.pool_ref = pool
+
     # !!! 关键：首次启动自动建表 !!!
     await check_pointer.setup()
     return check_pointer
@@ -71,7 +74,7 @@ pms_mysql_engine = create_async_engine(
     max_overflow=20,  # 超出池大小后最多还能建多少个临时连接
     echo=False  # 是否打印所有 SQL (生产环境关掉)
 )
-logger.info(">>> 已加载 PMS MySQL Engine")
+# logger.info(">>> 已加载 PMS MySQL Engine")
 
 ASSISTANTS_DB_URL = f"mysql+aiomysql://{settings.ASSISTANTS_DB_USERNAME}:{settings.ASSISTANTS_DB_PASSWORD}@{settings.ASSISTANTS_DB_HOST}:{settings.ASSISTANTS_DB_PORT}/{settings.ASSISTANTS_DB_DATABASE}"
 assistants_mysql_engine = create_async_engine(
@@ -81,14 +84,16 @@ assistants_mysql_engine = create_async_engine(
     max_overflow=20,  # 超出池大小后最多还能建多少个临时连接
     echo=False  # 是否打印所有 SQL (生产环境关掉)
 )
-logger.info(">>> 已加载 ASSISTANTS MySQL Engine")
+# logger.info(">>> 已加载 ASSISTANTS MySQL Engine")
 
 async_session_maker = async_sessionmaker(
     bind=assistants_mysql_engine,  # 绑定上面的引擎
     class_=AsyncSession,  # 指定生成的 Session 类型是异步的
     expire_on_commit=False  # 【关键点】提交后不立刻过期
 )
-logger.info(">>> 已加载 SESSION MAKER")
+
+
+# logger.info(">>> 已加载 SESSION MAKER")
 
 
 # def create_async_mysql_engine() -> AsyncEngine:

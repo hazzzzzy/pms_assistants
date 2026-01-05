@@ -1,18 +1,20 @@
-from fastapi import APIRouter, Header, Request, Depends
+from fastapi import APIRouter, Header, Request, Query
 from fastapi.responses import StreamingResponse
 
 from core.agent_context import AgentContext
-from schemas.agent import ChatRequest, DrawRequest, HistoryRequest, HistoryFeedRequest
+from schemas.agent_schema import ChatRequest, DrawRequest, FeedbackRequest, HistoryTableResponse, HistoryTableRequest, HistoryFeedRequest, \
+    HistoryFeedResponse
 from service import agent_service
+from utils.R import BaseResponse
 
 agent_router = APIRouter(prefix="/agent", tags=["agent"])
 
 
-@agent_router.post('/chat')
+@agent_router.post('/chat', summary='聊天')
 async def chat(req: ChatRequest,
                request: Request,
-               hotel_id: str = Header(..., alias='hotel_id'),
-               uid: str = Header(..., alias='uid')):
+               hotel_id: str = Header(..., alias='hotel_id', description='酒店id'),
+               uid: str = Header(..., alias='uid', description='员工id')):
     context = AgentContext(request.app, include_graph=True)
     gen = agent_service.chat(context, req.question, req.thread_id, hotel_id, uid)
     return StreamingResponse(gen, media_type="text/event-stream")
@@ -24,8 +26,16 @@ async def chat(request: Request, req: DrawRequest):
     return await agent_service.draw(context, req.file_name)
 
 
-@agent_router.get('/get_history')
-async def get_history(req: HistoryRequest = Depends()):
-    if isinstance(req, HistoryFeedRequest):
-        return await agent_service.get_history_feed(limit=req.limit, history_id=req.history_id)
+@agent_router.get('/get_history_feed', response_model=BaseResponse[HistoryFeedResponse], summary='获取聊天记录瀑布流（对话框）')
+async def get_history_feed(req: HistoryFeedRequest = Query()):
+    return await agent_service.get_history_feed(limit=req.limit, history_id=req.history_id)
+
+
+@agent_router.get('/get_history_table', response_model=BaseResponse[HistoryTableResponse], summary='获取聊天记录表格')
+async def get_history_table(req: HistoryTableRequest = Query()):
     return await agent_service.get_history_table(limit=req.limit, page=req.page)
+
+
+@agent_router.post('/feedback', summary='对消息进行反馈')
+async def feedback(req: FeedbackRequest):
+    return await agent_service.get_feedback(history_id=req.history_id, feedback=req.feedback)

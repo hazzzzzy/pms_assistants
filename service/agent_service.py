@@ -107,15 +107,21 @@ async def save_history_to_mysql(question: str, answer: str, uid: str):
 
 async def get_history_feed(history_id: int | None = None, limit: int = 10):
     async with db_session() as session:
-        history_stmt = select(ChatHistory).order_by(desc(ChatHistory.created_at), desc(ChatHistory.id)).limit(limit)
+        history_stmt = select(ChatHistory).order_by(desc(ChatHistory.created_at), desc(ChatHistory.id)).limit(limit + 1)
         if history_id:
             history_stmt = history_stmt.where(ChatHistory.id < history_id)
         history = await session.execute(history_stmt)
         history = history.scalars().all()
 
+        has_more = False
+        if len(history) > limit:
+            has_more = True
+            history = history[:-1]
+
         return R.success(
             {
-                'history': history,
+                'data': history,
+                'has_more': has_more
             }
         )
 
@@ -131,7 +137,19 @@ async def get_history_table(limit: int = 10, page: int = 1):
         total_count = total_count.scalar()
         return R.success(
             {
-                'history': history,
-                'count': total_count
+                'data': history,
+                'total_count': total_count
             }
         )
+
+
+async def get_feedback(history_id: int, feedback: int = 0):
+    async with db_session() as session:
+        history_stmt = select(ChatHistory).where(ChatHistory.id == history_id)
+        history = await session.execute(history_stmt)
+        history = history.scalar_one_or_none()
+        if history:
+            history.feedback = feedback
+            return R.success()
+        else:
+            return R.fail('未找到对应消息记录')
