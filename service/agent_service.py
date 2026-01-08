@@ -1,21 +1,28 @@
 import datetime
 import json
 import logging
+import uuid
 
+from fastapi import BackgroundTasks
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import desc, func, select
 
 from core.agent_context import AgentContext
 from core.agent_prompt import AGENT_SYSTEM_PROMPT, AGENT_USER_PROMPT
 from core.db import db_session
-from db_models.models import ChatHistory
+from db_models.models import ChatHistory, UserThread
 from utils.R import R
 from utils.abs_path import abs_path
 
 logger = logging.getLogger(__name__)
 
 
-async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
+async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, thread_id, hotel_id, user_id):
+    is_new_session = not bool(thread_id)
+    thread_id = thread_id if thread_id else str(uuid.uuid4())
     current_time = datetime.datetime.now().strftime("%Y-%m-%d")
     inputs = {
         "messages": [
@@ -23,7 +30,7 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
                 id="sys_prompt", content=AGENT_SYSTEM_PROMPT.format(hotel_id)
             ),
             HumanMessage(
-                content=AGENT_USER_PROMPT.format(current_time, hotel_id, uid, question)
+                content=AGENT_USER_PROMPT.format(current_time, hotel_id, user_id, question)
             ),
         ]
     }
@@ -32,6 +39,7 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
         "recursion_limit": 50,
     }
     ai_output = ""
+    # todo: 生产环境需要把异常捕获还原
     # try:
     async for event in ctx.graph.astream_events(
             inputs, version="v2", config=agent_config
@@ -52,20 +60,20 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
         elif kind == "on_chat_model_end":
             chunk = event["data"]["output"]
             langgraph_node = event["metadata"]["langgraph_node"]
-            if chunk.content and langgraph_node != "router":
-                logger.info(f"[AI说]: {chunk.content}")
+            # if chunk.content and langgraph_node != "router":
+            #     logger.info(f"[AI说]: {chunk.content}")
         # --- 场景 2: 捕获工具调用 (可选，用于调试或前端展示 loading) ---
         elif kind == "on_tool_start":
             tool_name = event["name"]
             tool_inputs = event["data"].get("input")
-            logger.info(f"[正在调用工具]: {tool_name} 参数: {tool_inputs}")
+            # logger.info(f"[正在调用工具]: {tool_name} 参数: {tool_inputs}")
             # yield f"data: {json.dumps({"text": ' 正在调用工具...'}, ensure_ascii=False)}\n\n"
 
         # --- 场景 3: 捕获工具返回结果 (可选) ---
         elif kind == "on_tool_end":
             # 有些工具输出可能很长，截断打印日志
             output = str(event["data"].get("output"))
-            logger.info(f"[工具返回]: {output[:100]}...")
+            # logger.info(f"[工具返回]: {output[:100]}...")
 
         # except Exception as e:
         #     # yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -76,7 +84,58 @@ async def chat(ctx: AgentContext, question, thread_id, hotel_id, uid):
     yield "data: [DONE]\n\n"
     # 存储进数据库
     if ai_output:
-        await save_history_to_mysql(question=question, answer=ai_output, uid=uid)
+        async with db_session() as session:
+            new_history = ChatHistory(question=question, answer=ai_output, user_id=user_id, thread_id=thread_id)
+            session.add(new_history)
+    if is_new_session:
+        background_tasks.add_task(
+            save_title,
+            llm=ctx.llm,
+            question=question,
+            answer=ai_output,
+            user_id=user_id,
+            thread_id=thread_id
+        )
+
+
+async def generate_session_title(llm: BaseChatModel, question: str, answer: str) -> str:
+    """
+    根据用户的第一条消息生成简短的会话标题。
+    """
+
+    # 1. 定义 Prompt
+    # 关键点：限制字数，强制要求不加标点，不加解释
+    prompt = ChatPromptTemplate.from_template(
+        """
+        你是一个专业的对话总结助手。请根据用户的输入内容，生成一个极简短的会话标题。
+
+        要求：
+        1. 长度控制在 10-15 个字以内。
+        2. 不要包含任何标点符号（如句号、引号）。
+        3. 不要包含“标题”、“关于”等前缀词。
+        4. 如果输入是无意义的问候（如“你好”），返回“新会话”。
+        5. 直接输出结果，不要有任何客套话。
+
+        用户输入: {question}
+        AI输出：{answer}
+        """
+    )
+
+    # 2. 组装链 (Prompt -> LLM -> String)
+    # 使用 StrOutputParser 直接拿回字符串，而不是 AIMessage 对象
+    chain = prompt | llm | StrOutputParser()
+
+    try:
+        # 3. 执行
+        title = await chain.ainvoke({"question": question, 'answer': answer})
+
+        # 4. 兜底清洗 (防止 LLM 还是加了引号或空格)
+        return title.strip().strip('"').strip("《").strip("》")
+
+    except Exception as e:
+        print(f"生成标题失败: {e}")
+        # 如果 LLM 挂了，返回默认标题，不影响主流程
+        return question[:15] if question else "新会话"
 
 
 async def draw(ctx: AgentContext, file_name):
@@ -87,27 +146,18 @@ async def draw(ctx: AgentContext, file_name):
     return R.success()
 
 
-async def save_history_to_mysql(question: str, answer: str, uid: str):
+async def save_title(llm: BaseChatModel, question: str, answer: str, user_id: str, thread_id: str):
+    question = question[:100] if question else '用户问题为空'
+    answer = answer[:100] if answer else 'AI回复为空'
+    title = await generate_session_title(llm=llm, question=question, answer=answer)
     async with db_session() as session:
-        # === 查询 (SELECT) ===
-        # 以前: room = Room.query.filter_by(id=room_id).first()
-        # 现在: 必须构建 SQL 语句 -> 执行 -> 取值
-
-        # Step A: 构建语句 (像写原生 SQL 一样)
-        new_history = ChatHistory(question=question, answer=answer, uid=uid)
-
-        # Step B: 执行语句 (必须 await，这是 IO 操作)
-        session.add(new_history)
-
-        # Step C: 提取数据
-        # scalars() 的意思是：把结果行(Row)转成对象(ORM Object)
-        # first() 取第一条，one_or_none() 取一条或空
-        # room = result.scalars().one_or_none()
+        new_thread = UserThread(user_id=user_id, thread_id=thread_id, title=title)
+        session.add(new_thread)
 
 
-async def get_history_feed(history_id: int | None = None, limit: int = 10):
+async def get_history_feed(history_id: int | None = None, limit: int = 10, thread_id: str | None = None):
     async with db_session() as session:
-        history_stmt = select(ChatHistory).order_by(desc(ChatHistory.created_at), desc(ChatHistory.id)).limit(limit + 1)
+        history_stmt = select(ChatHistory).where(thread_id=thread_id).order_by(desc(ChatHistory.created_at), desc(ChatHistory.id)).limit(limit + 1)
         if history_id:
             history_stmt = history_stmt.where(ChatHistory.id < history_id)
         history = await session.execute(history_stmt)
@@ -153,3 +203,19 @@ async def get_feedback(history_id: int, feedback: int = 0):
             return R.success()
         else:
             return R.fail('未找到对应消息记录')
+
+
+async def get_user_thread(user_id: int):
+    async with db_session() as session:
+        thread_stmt = select(UserThread).where(UserThread.user_id == user_id)
+        thread = await session.execute(thread_stmt)
+        thread = thread.scalars().all()
+
+        # has_more = False
+        # if len(history) > limit:
+        #     has_more = True
+        #     history = history[:-1]
+        return R.success({
+            'data': thread,
+            # 'has_more': has_more
+        })

@@ -80,7 +80,7 @@ def build_agent_search_vector(ctx: AgentContext):
         schema_result, qa_result = '', ''
         for doc in schema_search_result:
             # if score < schema_min_score:
-            logger.info(doc.metadata['table_name'])
+            # logger.info(doc.metadata['table_name'])
             doc = f'表名：{doc.metadata['table_name']}\n表中文名：{doc.metadata['table_zh_name']}\n表结构：{doc.metadata['table_structure']}\n'
             schema_result += doc
         for doc, score in qa_search_result:

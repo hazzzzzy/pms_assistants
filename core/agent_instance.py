@@ -2,8 +2,8 @@ import logging
 from typing import Annotated, Literal, TypedDict
 
 import tiktoken
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, trim_messages, ToolMessage, AIMessage
-from langchain_deepseek import ChatDeepSeek
 from langgraph.constants import END
 from langgraph.graph import StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
@@ -23,8 +23,9 @@ class AgentState(TypedDict):
 
 
 class AgentInstance:
-    def __init__(self):
-        self.llm = ChatDeepSeek(model="deepseek-chat", temperature=0.1)
+    def __init__(self, llm: BaseChatModel):
+        self.llm = llm
+        # self.llm = ChatDeepSeek(model="deepseek-chat", temperature=0.1)
         self.llm_with_tools = None
 
     def init_tools_and_llm(self, ctx: AgentContext):

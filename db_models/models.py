@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, String, Text, func, text
+from sqlalchemy import DateTime, String, Text, func, text, Integer
 from sqlalchemy.dialects.mysql import TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,7 +16,7 @@ class ChatHistory(Base):
     # 具体的业务字段
     question: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
     answer: Mapped[Optional[str]] = mapped_column(Text(collation="utf8mb4_bin"))
-    uid: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
+    user_id: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
     thread_id: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
     feedback: Mapped[Optional[int]] = mapped_column(
         TINYINT, server_default=text("'0'"), default=0, comment="0-无反馈 1-赞 2-踩"
@@ -33,3 +33,11 @@ class PresetQuestion(Base):
         server_default=func.now(),
         onupdate=func.now(),  # 每次更新记录时自动刷新时间
     )
+
+
+class UserThread(Base):
+    __tablename__ = "user_thread"
+
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, index=True)
+    thread_id: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
+    title: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))

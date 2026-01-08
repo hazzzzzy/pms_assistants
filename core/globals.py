@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import FastAPI
+from langchain_deepseek import ChatDeepSeek
 
 from core.agent_context import AgentContext
 from core.agent_instance import AgentInstance
@@ -10,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 async def init_globals(app: FastAPI):
+    llm = ChatDeepSeek(model="deepseek-chat", temperature=0.1)
+    app.state.llm = llm
+
     chroma_instance = ChromaInstance()
     app.state.vs_schema = chroma_instance.load_vectorstore('table_structure')
     app.state.vs_qa = chroma_instance.load_vectorstore('qa_sql')
@@ -28,5 +32,5 @@ async def init_globals(app: FastAPI):
     logger.info(">>> 已加载 POSTGRES CHECKPOINT SAVER")
 
     ctx = AgentContext(app, include_graph=False)
-    app.state.graph = AgentInstance().build(ctx, checkpointer)
+    app.state.graph = AgentInstance(llm).build(ctx, checkpointer)
     logger.info(">>> 已加载 Graph")
