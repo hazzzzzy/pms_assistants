@@ -38,6 +38,7 @@ class PresetQuestion(Base):
 class UserThread(Base):
     __tablename__ = "user_thread"
 
-    user_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, index=True)
-    thread_id: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
+    user_id: Mapped[Optional[int]] = mapped_column(Integer)
+    hotel_id: Mapped[Optional[int]] = mapped_column(Integer)
+    thread_id: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"), unique=True, index=True)
     title: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))

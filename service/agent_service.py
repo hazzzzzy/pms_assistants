@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, thread_id, hotel_id, user_id):
     is_new_session = not bool(thread_id)
     thread_id = thread_id if thread_id else str(uuid.uuid4())
+    thread_id_json = json.dumps({"type": 'meta', 'thread_id': thread_id}, ensure_ascii=False)
+    yield f"data: {thread_id_json}\n\n"
+
     current_time = datetime.datetime.now().strftime("%Y-%m-%d")
     inputs = {
         "messages": [
@@ -55,13 +58,13 @@ async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, t
             # 过滤掉工具调用的参数生成过程 (agent 思考参数时 content 为空)
             if chunk.content and langgraph_node != "router":
                 ai_output += chunk.content
-                payload = json.dumps({"text": chunk.content}, ensure_ascii=False)
+                payload = json.dumps({'type': 'delta', "text": chunk.content}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
         elif kind == "on_chat_model_end":
             chunk = event["data"]["output"]
             langgraph_node = event["metadata"]["langgraph_node"]
             # if chunk.content and langgraph_node != "router":
-            #     logger.info(f"[AI说]: {chunk.content}")
+            # logger.info(f"[AI说]: {chunk.content}")
         # --- 场景 2: 捕获工具调用 (可选，用于调试或前端展示 loading) ---
         elif kind == "on_tool_start":
             tool_name = event["name"]
@@ -78,7 +81,7 @@ async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, t
         # except Exception as e:
         #     # yield f"data: {json.dumps({'error': str(e)})}\n\n"
         #     logger.error(e)
-        #     yield f"data: {json.dumps({'text': str(e)})}\n\n"
+        #     yield f"data: {json.dumps({'type': 'delta','error': str(e)})}\n\n"
         # finally:
         # 流式结束
     yield "data: [DONE]\n\n"
@@ -94,7 +97,8 @@ async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, t
             question=question,
             answer=ai_output,
             user_id=user_id,
-            thread_id=thread_id
+            thread_id=thread_id,
+            hotel_id=hotel_id
         )
 
 
@@ -146,12 +150,12 @@ async def draw(ctx: AgentContext, file_name):
     return R.success()
 
 
-async def save_title(llm: BaseChatModel, question: str, answer: str, user_id: str, thread_id: str):
+async def save_title(llm: BaseChatModel, question: str, answer: str, user_id: int, thread_id: str, hotel_id: int):
     question = question[:100] if question else '用户问题为空'
     answer = answer[:100] if answer else 'AI回复为空'
     title = await generate_session_title(llm=llm, question=question, answer=answer)
     async with db_session() as session:
-        new_thread = UserThread(user_id=user_id, thread_id=thread_id, title=title)
+        new_thread = UserThread(user_id=user_id, thread_id=thread_id, title=title, hotel_id=hotel_id)
         session.add(new_thread)
 
 
@@ -205,17 +209,21 @@ async def get_feedback(history_id: int, feedback: int = 0):
             return R.fail('未找到对应消息记录')
 
 
-async def get_user_thread(user_id: int):
+async def get_user_thread(user_id: int, hotel_id: int, limit: int = 10, before_id: int = None):
     async with db_session() as session:
-        thread_stmt = select(UserThread).where(UserThread.user_id == user_id)
+        thread_stmt = select(UserThread).where(UserThread.user_id == user_id, UserThread.hotel_id == hotel_id)
+        if before_id is not None:
+            thread_stmt = thread_stmt.where(UserThread.id < before_id)
+
+        thread_stmt = thread_stmt.order_by(UserThread.created_at.desc()).limit(limit + 1)
         thread = await session.execute(thread_stmt)
         thread = thread.scalars().all()
 
-        # has_more = False
-        # if len(history) > limit:
-        #     has_more = True
-        #     history = history[:-1]
+        has_more = False
+        if len(thread) > limit:
+            has_more = True
+            thread = thread[:-1]
         return R.success({
             'data': thread,
-            # 'has_more': has_more
+            'has_more': has_more
         })

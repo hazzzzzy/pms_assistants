@@ -51,6 +51,7 @@ def build_agent_search_vector(ctx: AgentContext):
     async def agent_search_vector(query: str, k: int = 5, schema_min_score: float = 2.0, qa_min_score: float = 0.5):
         """
         这是一个向量数据库检索工具,基于语义相似度检索表结构与预设问答sql向量数据库中的相关文档。
+        仅供查询酒店内部相关数据时使用，例如经营数据、房态数据、酒店房间元数据等等
         当需要理解表结构、字段含义时，则必须使用此工具
 
         Args:

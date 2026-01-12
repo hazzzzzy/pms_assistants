@@ -14,11 +14,15 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", json_schema_extra={
         "example": {
             "question": '今天天气怎么样',
-            "thread_id": '123-123'
+            "thread_id": '123-123',
+            'hotel_id': 100785,
+            'user_id': 1111
         }
     })
     question: str = Field(..., description="用户问题")
     thread_id: str | None = Field(None, description="会话id")
+    hotel_id: int = Field(..., ge=0, description="酒店id")
+    user_id: int = Field(..., ge=0, description="员工id")
 
 
 class DrawRequest(BaseModel):
@@ -35,7 +39,7 @@ class HistoryFeedRequest(BaseModel):
     })
 
     limit: int = Query(10, ge=1, le=100, description="每页条数")
-    history_id: Optional[int] = Query(None, description="最早一条消息ID")
+    history_id: Optional[int] = Query(None, description="若传入，则获取该id以前 {limit} 条数据")
     thread_id: Optional[str] = Query(None, description="会话ID")
 
 
@@ -68,11 +72,17 @@ class FeedbackRequest(BaseModel):
 class ThreadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", json_schema_extra={
         "example": {
-            'user_id': 1314
+            'id': 1314,
+            'user_id': 1314,
+            'hotel_id': 1314,
+            'limit': 10
         }
     })
 
-    user_id: int = Field(..., ge=0, description="用户id")
+    id: int | None = Query(None, ge=0, description="若传入，则获取该id以前 {limit} 条数据")
+    user_id: int = Query(..., ge=0, description="用户id")
+    hotel_id: int = Query(..., ge=0, description="酒店id")
+    limit: int = Query(10, ge=0, le=100, description="每次获取的条数")
 
 
 # =======================
@@ -95,8 +105,10 @@ class ThreadSchema(BaseModel):
     # 关键配置：允许从 ORM 对象读取数据 (旧版叫 orm_mode = True)
     model_config = ConfigDict(from_attributes=True)
 
+    id: int
     thread_id: str
     title: str
+    created_at: datetime
 
 
 class HistoryTableResponse(BaseModel):
@@ -110,5 +122,5 @@ class HistoryFeedResponse(BaseModel):
 
 
 class ThreadResponse(BaseModel):
-    # has_more: bool
+    has_more: bool
     data: List[ThreadSchema]

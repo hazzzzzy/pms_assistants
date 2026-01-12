@@ -9,7 +9,7 @@ from langgraph.graph import StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
 
 from core.agent_context import AgentContext
-from core.agent_prompt import AGENT_SYSTEM_PROMPT, CHAT_PROMPT, ROUTER_PROMPT
+from core.agent_prompt import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, ROUTER_PROMPT
 from core.agent_tools import build_agent_query_mysql, build_agent_search_vector
 
 logger = logging.getLogger(__name__)
@@ -35,21 +35,22 @@ class AgentInstance:
 
     def use_trimmer(self, messages):
         system_message = [m for m in messages if isinstance(m, SystemMessage)]
+        other_messages = [m for m in messages if not isinstance(m, SystemMessage)]
 
         question = None
+        # question = messages[-1] if isinstance(messages[-1], HumanMessage) else None
         for msg in reversed(messages):
             if isinstance(msg, HumanMessage):
                 question = msg
                 break
 
         trimmed_messages = trim_messages(
-            messages,
-            # 策略：保留最后面的消息
+            other_messages,
             strategy="last",
             token_counter=self.count_tokens,
             # token_counter=len,
             max_tokens=6000,
-            include_system=True,
+            include_system=False,
             # 确保对话从 Human 开始
             # start_on="human",
             # 允许部分修剪（通常设为 False 以保证完整性）
@@ -57,27 +58,37 @@ class AgentInstance:
         )
 
         valid_messages = []
+        active_tool_call_ids = set()
         for i, msg in enumerate(trimmed_messages):
-            if isinstance(msg, ToolMessage):
-                # tool_call_id = msg.tool_call_id
-                if i - 1 > 0 and isinstance(trimmed_messages[i - 1], AIMessage) and trimmed_messages[i - 1].tool_calls:
-                    # or trimmed_messages[i - 1].tool_calls[0].get('id') != tool_call_id):
+            if isinstance(msg, AIMessage):
+                valid_messages.append(msg)
+                # 如果这条 AI 消息发起了调用，记录 ID
+                if msg.tool_calls:
+                    active_tool_call_ids = {call['id'] for call in msg.tool_calls}
+                else:
+                    active_tool_call_ids = set()
+            elif isinstance(msg, ToolMessage):
+                # 检查这条工具消息的 ID 是否在刚才记录的 ID 集合里
+                if msg.tool_call_id in active_tool_call_ids:
                     valid_messages.append(msg)
+                    # 注意：这里不能从 set 里移除 ID，因为有时候模型可能会重试（虽然少见），
+                    # 或者如果你为了保险，不移除也没事。
             else:
                 valid_messages.append(msg)
+                # 遇到 Human 消息通常意味着一轮对话结束，重置 ID 集合
+                if isinstance(msg, HumanMessage):
+                    active_tool_call_ids = set()
 
-        other_messages = [m for m in valid_messages if not isinstance(m, SystemMessage)]
         if question and question not in valid_messages:
-            final_messages = [question] + other_messages
-        else:
-            final_messages = other_messages
-        return system_message + final_messages
+            valid_messages = [question] + valid_messages
+        # return system_message + final_messages
+        return system_message + valid_messages
 
     async def chat_node(self, state: AgentState):
         messages = state['messages']
         clean_messages = [m for m in messages if not isinstance(m, SystemMessage)]
 
-        input_message = [SystemMessage(content=CHAT_PROMPT)] + clean_messages
+        input_message = [SystemMessage(content=CHAT_SYSTEM_PROMPT)] + clean_messages
         input_message = self.use_trimmer(input_message)
 
         response = await self.llm.ainvoke(input_message)
@@ -115,7 +126,6 @@ class AgentInstance:
         # 如果 LLM 的回复里包含 tool_calls，说明它想查库 -> 转去工具节点
         if last_message.tool_calls:
             return "tools"
-        # print(messages)
         # 否则说明它觉得信息够了，已经生成了最终文本 -> 结束
         return "__end__"
 
@@ -131,10 +141,7 @@ class AgentInstance:
         tool_node = ToolNode(tools)
         workflow.add_node("tools", tool_node)
 
-        # 设置入口
         workflow.set_entry_point("router")
-
-        # 条件边：根据 router 的结果跳转
         workflow.add_conditional_edges(
             "router",
             lambda state: state["next_node"],  # 读取 next_node 字段
@@ -143,14 +150,10 @@ class AgentInstance:
                 "chat_agent": "chat_agent"
             }
         )
-
-        # 添加条件边：AI 思考完后，决定是去查库(tools)还是结束(END)
         workflow.add_conditional_edges(
             "rag_sql_agent",
             self.should_continue,
         )
-
-        # 添加普通边：工具查完后，必须把结果扔回给 AI，让它继续思考
         workflow.add_edge("tools", "rag_sql_agent")
         workflow.add_edge("chat_agent", END)  # 答案生成完 -> 结束
 
