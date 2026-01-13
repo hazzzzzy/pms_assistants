@@ -13,7 +13,7 @@ from sqlalchemy import desc, func, select
 from core.agent_context import AgentContext
 from core.agent_prompt import AGENT_SYSTEM_PROMPT, AGENT_USER_PROMPT
 from core.db import db_session
-from db_models.models import ChatHistory, UserThread
+from db_models.models import ChatHistory, UserThread, PresetQuestion
 from utils.R import R
 from utils.abs_path import abs_path
 
@@ -161,7 +161,8 @@ async def save_title(llm: BaseChatModel, question: str, answer: str, user_id: in
 
 async def get_history_feed(history_id: int | None = None, limit: int = 10, thread_id: str | None = None):
     async with db_session() as session:
-        history_stmt = select(ChatHistory).where(thread_id=thread_id).order_by(desc(ChatHistory.created_at), desc(ChatHistory.id)).limit(limit + 1)
+        history_stmt = select(ChatHistory).where(ChatHistory.thread_id == thread_id).order_by(desc(ChatHistory.created_at),
+                                                                                              desc(ChatHistory.id)).limit(limit + 1)
         if history_id:
             history_stmt = history_stmt.where(ChatHistory.id < history_id)
         history = await session.execute(history_stmt)
@@ -226,4 +227,15 @@ async def get_user_thread(user_id: int, hotel_id: int, limit: int = 10, before_i
         return R.success({
             'data': thread,
             'has_more': has_more
+        })
+
+
+async def get_preset_question(limit: int = 10, page: int = 1):
+    async with db_session() as session:
+        preset_question_stmt = select(PresetQuestion).order_by(PresetQuestion.created_at.desc()).offset((page - 1) * limit).limit(limit + 1)
+        preset_question = await session.scalars(preset_question_stmt)
+        preset_question = preset_question.all()
+
+        return R.success({
+            'data': preset_question,
         })

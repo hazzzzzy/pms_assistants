@@ -27,8 +27,7 @@ class PresetQuestion(Base):
     __tablename__ = "preset_question"
     content: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
 
-    # Base里叫 created_at，这里如果需要更新时间，单独定义 update_at
-    update_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime,
         server_default=func.now(),
         onupdate=func.now(),  # 每次更新记录时自动刷新时间

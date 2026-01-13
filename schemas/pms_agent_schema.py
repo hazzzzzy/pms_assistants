@@ -38,9 +38,9 @@ class HistoryFeedRequest(BaseModel):
         }
     })
 
-    limit: int = Query(10, ge=1, le=100, description="每页条数")
+    limit: int = Query(10, ge=10, le=100, description="每页条数")
     history_id: Optional[int] = Query(None, description="若传入，则获取该id以前 {limit} 条数据")
-    thread_id: Optional[str] = Query(None, description="会话ID")
+    thread_id: Optional[str] = Query(..., description="会话ID")
 
 
 class HistoryTableRequest(BaseModel):
@@ -52,7 +52,7 @@ class HistoryTableRequest(BaseModel):
         }
     })
 
-    limit: int = Query(10, ge=1, le=100, description="每页条数")
+    limit: int = Query(10, ge=10, le=100, description="每页条数")
     page: int = Query(1, ge=1, description="页码")
     user_id: int = Query(1, ge=1, description="用户id")
 
@@ -82,11 +82,23 @@ class ThreadRequest(BaseModel):
     id: int | None = Query(None, ge=0, description="若传入，则获取该id以前 {limit} 条数据")
     user_id: int = Query(..., ge=0, description="用户id")
     hotel_id: int = Query(..., ge=0, description="酒店id")
-    limit: int = Query(10, ge=0, le=100, description="每次获取的条数")
+    limit: int = Query(10, ge=10, le=100, description="每次获取的条数")
+
+
+class PresetQuestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", json_schema_extra={
+        "example": {
+            'limit': 10,
+            'page': 1,
+        }
+    })
+
+    limit: int = Query(10, ge=10, le=100, description="每次获取的条数")
+    page: int = Query(1, ge=1, le=100, description="页码")
 
 
 # =======================
-# 2. 响应参数 (Response)
+# 2. 数据结构
 # =======================
 
 class HistorySchema(BaseModel):
@@ -111,6 +123,17 @@ class ThreadSchema(BaseModel):
     created_at: datetime
 
 
+class PresetQuestionSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    content: str
+
+
+# =======================
+# 3. 响应参数 (Response)
+# =======================
+
 class HistoryTableResponse(BaseModel):
     total_count: int
     data: List[HistorySchema]
@@ -124,3 +147,7 @@ class HistoryFeedResponse(BaseModel):
 class ThreadResponse(BaseModel):
     has_more: bool
     data: List[ThreadSchema]
+
+
+class PresetQuestionResponse(BaseModel):
+    data: List[PresetQuestionSchema]

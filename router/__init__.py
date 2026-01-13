@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from router.agent import agent_router
+from router.pms_agent import agent_router
 
 
 def register_routers(app):
