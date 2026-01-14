@@ -1,5 +1,5 @@
 ```shell
-uvicorn main:app --reload --host 0.0.0.0 --port 8877
+uvicorn main:app --reload --host 0.0.0.0 --port 8866
 ```
 
 ```shell

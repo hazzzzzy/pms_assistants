@@ -10,7 +10,7 @@ from langgraph.prebuilt import ToolNode
 
 from core.agent_context import AgentContext
 from core.agent_prompt import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, ROUTER_PROMPT
-from core.agent_tools import build_agent_query_mysql, build_agent_search_vector
+from core.agent_tools import pms_query_mysql, pms_search_vector
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class AgentInstance:
         self.llm_with_tools = None
 
     def init_tools_and_llm(self, ctx: AgentContext):
-        tools = [build_agent_query_mysql(ctx), build_agent_search_vector(ctx)]
+        tools = [pms_query_mysql, pms_search_vector(ctx)]
         self.llm_with_tools = self.llm.bind_tools(tools)
         return tools
 
@@ -82,6 +82,11 @@ class AgentInstance:
         if question and question not in valid_messages:
             valid_messages = [question] + valid_messages
         # return system_message + final_messages
+        # _ = system_message + valid_messages
+        # for msg in _:
+        #     msg_type = msg.type.upper()
+        #     msg_content = msg.content
+        # logger.info(f'{msg_type}: {msg_content}\n')
         return system_message + valid_messages
 
     async def chat_node(self, state: AgentState):

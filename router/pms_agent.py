@@ -42,7 +42,9 @@ async def get_history_table(req: HistoryTableRequest = Query()):
     return await pms_agent_service.get_history_table(limit=req.limit, page=req.page)
 
 
-@agent_router.post('/feedback', summary='对AI的回答进行反馈（赞/踩）')
+@agent_router.post('/feedback', summary='对AI的回答进行反馈（赞/踩）', description='''
+## feedback 0-无反馈 1-赞 2-踩
+''')
 async def feedback(req: FeedbackRequest):
     return await pms_agent_service.get_feedback(history_id=req.history_id, feedback=req.feedback)
 

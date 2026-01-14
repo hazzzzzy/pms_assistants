@@ -12,7 +12,7 @@ from sqlalchemy import desc, func, select
 
 from core.agent_context import AgentContext
 from core.agent_prompt import AGENT_SYSTEM_PROMPT, AGENT_USER_PROMPT
-from core.db import db_session
+from core.db import db_session, async_session_maker
 from db_models.models import ChatHistory, UserThread, PresetQuestion
 from utils.R import R
 from utils.abs_path import abs_path
@@ -84,12 +84,6 @@ async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, t
         #     yield f"data: {json.dumps({'type': 'delta','error': str(e)})}\n\n"
         # finally:
         # 流式结束
-    yield "data: [DONE]\n\n"
-    # 存储进数据库
-    if ai_output:
-        async with db_session() as session:
-            new_history = ChatHistory(question=question, answer=ai_output, user_id=user_id, thread_id=thread_id)
-            session.add(new_history)
     if is_new_session:
         background_tasks.add_task(
             save_title,
@@ -100,6 +94,19 @@ async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, t
             thread_id=thread_id,
             hotel_id=hotel_id
         )
+    # 存储进数据库
+    history_id = None
+    if ai_output:
+        async with async_session_maker() as session:
+            new_history = ChatHistory(question=question, answer=ai_output, user_id=user_id, thread_id=thread_id)
+            session.add(new_history)
+            await session.commit()
+            await session.refresh(new_history)
+            history_id = new_history.id
+    if history_id:
+        history_id_json = json.dumps({"type": 'meta', 'history_id': history_id}, ensure_ascii=False)
+        yield f"data: {history_id_json}\n\n"
+    yield "data: [DONE]\n\n"
 
 
 async def generate_session_title(llm: BaseChatModel, question: str, answer: str) -> str:
@@ -232,10 +239,15 @@ async def get_user_thread(user_id: int, hotel_id: int, limit: int = 10, before_i
 
 async def get_preset_question(limit: int = 10, page: int = 1):
     async with db_session() as session:
-        preset_question_stmt = select(PresetQuestion).order_by(PresetQuestion.created_at.desc()).offset((page - 1) * limit).limit(limit + 1)
+        preset_question_stmt = select(PresetQuestion).order_by(PresetQuestion.created_at.desc()).offset((page - 1) * limit).limit(limit)
         preset_question = await session.scalars(preset_question_stmt)
         preset_question = preset_question.all()
 
+        total_count_stmt = select(func.count()).select_from(PresetQuestion)
+        total_count = await session.execute(total_count_stmt)
+        total_count = total_count.scalar()
+
         return R.success({
             'data': preset_question,
+            'total_count': total_count
         })

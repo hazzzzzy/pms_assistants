@@ -13,40 +13,36 @@ logger = logging.getLogger(__name__)
 # class QueryResult:
 #     code: int
 #     result:
-def build_agent_query_mysql(ctx: AgentContext):
-    @tool
-    async def agent_query_mysql(query: str):
-        """
-        这是一个mysql数据库检索工具，执行SQL查询并返回结果，注意，只允许进行查询且使用此工具查询的表结构没有注释
-        Args:
-            query: SQL语句
+async def pms_query_mysql(query: str):
+    """
+    这是一个mysql数据库检索工具，执行SQL查询并返回结果，注意，只允许进行查询且使用此工具查询的表结构没有注释
+    Args:
+        query: SQL语句
 
-        Returns:
-            code: 状态码（0-成功，-1-失败，-2-不允许更改数据）
-            result: 状态码为0时，返回查询结果；状态码不为0时，返回查询失败原因
-        """
-        # logger.info(f"[工具调用] 正在执行 SQL: {query}")
-        try:
-            query_header = ['SELECT', 'select', 'show', 'SHOW', 'DESCRIBE', 'describe']
-            if not any([query.startswith(i) for i in query_header]):
-                # if not query.startswith('SELECT') and not query.startswith('select'):
-                return -2, f"执行失败: 不允许篡改数据"
-            query_start_time = time.time()
-            async with pms_mysql_engine.connect() as conn:
-                result = await conn.execute(text(query))
-                rows = result.fetchall()
-                query_end_time = time.time()
-                logger.info(f'查询耗时 {(query_end_time - query_start_time):4f}s')
-                data = [dict(row._mapping) for row in rows]
-            return 0, str(data)
-        except Exception as e:
-            logger.error(f'sql执行异常：{e}')
-            return -1, f"执行失败: {str(e)}"
-
-    return agent_query_mysql
+    Returns:
+        code: 状态码（0-成功，-1-失败，-2-不允许更改数据）
+        result: 状态码为0时，返回查询结果；状态码不为0时，返回查询失败原因
+    """
+    # logger.info(f"[工具调用] 正在执行 SQL: {query}")
+    try:
+        query_header = ['SELECT', 'select', 'show', 'SHOW', 'DESCRIBE', 'describe']
+        if not any([query.startswith(i) for i in query_header]):
+            # if not query.startswith('SELECT') and not query.startswith('select'):
+            return -2, f"执行失败: 不允许篡改数据"
+        query_start_time = time.time()
+        async with pms_mysql_engine.connect() as conn:
+            result = await conn.execute(text(query))
+            rows = result.fetchall()
+            query_end_time = time.time()
+            logger.info(f'查询耗时 {(query_end_time - query_start_time):4f}s')
+            data = [dict(row._mapping) for row in rows]
+        return 0, str(data)
+    except Exception as e:
+        logger.error(f'sql执行异常：{e}')
+        return -1, f"执行失败: {str(e)}"
 
 
-def build_agent_search_vector(ctx: AgentContext):
+def pms_search_vector(ctx: AgentContext):
     @tool
     async def agent_search_vector(query: str, k: int = 5, schema_min_score: float = 2.0, qa_min_score: float = 0.5):
         """

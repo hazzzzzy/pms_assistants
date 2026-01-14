@@ -93,7 +93,7 @@ class PresetQuestionRequest(BaseModel):
         }
     })
 
-    limit: int = Query(10, ge=10, le=100, description="每次获取的条数")
+    limit: int = Query(10, ge=1, le=100, description="每次获取的条数")
     page: int = Query(1, ge=1, le=100, description="页码")
 
 
@@ -111,6 +111,7 @@ class HistorySchema(BaseModel):
     created_at: datetime
     thread_id: str
     user_id: int
+    feedback: int
 
 
 class ThreadSchema(BaseModel):
@@ -151,3 +152,4 @@ class ThreadResponse(BaseModel):
 
 class PresetQuestionResponse(BaseModel):
     data: List[PresetQuestionSchema]
+    total_count: int
