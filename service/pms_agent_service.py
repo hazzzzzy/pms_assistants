@@ -1,17 +1,19 @@
 import datetime
+import io
 import json
 import logging
 import uuid
 
-from fastapi import BackgroundTasks
+import pandas as pd
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import desc, func, select
 
+from config.config import settings
 from core.agent_context import AgentContext
-from core.agent_prompt import AGENT_SYSTEM_PROMPT, AGENT_USER_PROMPT
+from core.agent_prompt import AGENT_SYSTEM_PROMPT, AGENT_USER_PROMPT, TITLE_GENERATE_SYSTEM_PROMPT
 from core.db import db_session, async_session_maker
 from db_models.models import ChatHistory, UserThread, PresetQuestion
 from utils.R import R
@@ -20,20 +22,42 @@ from utils.abs_path import abs_path
 logger = logging.getLogger(__name__)
 
 
-async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, thread_id, hotel_id, user_id):
+async def parse_excel(file):
+    if file:
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            return R.fail('只支持 xlsx/xls 文件')
+
+        content = await file.read()
+        if len(content) > settings.MAX_FILE_SIZE_BYTES:
+            return R.fail(f"文件实际大小超过限制 ({settings.MAX_FILE_SIZE_BYTES} MB)")
+
+        # 解析 Excel
+        df = pd.read_excel(io.BytesIO(content))
+        df = df.fillna("")  # 填充空值
+        file_md = df.to_markdown(index=False)
+
+        file_context = f"\n\n【用户上传的文件内容】:\n{file_md}\n\n"
+        return file.filename, file_context
+    else:
+        return None, ''
+
+
+async def chat(ctx: AgentContext, file, question, thread_id, hotel_id, user_id):
+    file_name, file_content = await parse_excel(file)
+
     is_new_session = not bool(thread_id)
     thread_id = thread_id if thread_id else str(uuid.uuid4())
     thread_id_json = json.dumps({"type": 'meta', 'thread_id': thread_id}, ensure_ascii=False)
     yield f"data: {thread_id_json}\n\n"
 
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d")
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     inputs = {
         "messages": [
             SystemMessage(
                 id="sys_prompt", content=AGENT_SYSTEM_PROMPT.format(hotel_id)
             ),
             HumanMessage(
-                content=AGENT_USER_PROMPT.format(current_time, hotel_id, user_id, question)
+                content=AGENT_USER_PROMPT.format(current_time, hotel_id, user_id, question + file_content)
             ),
         ]
     }
@@ -54,29 +78,29 @@ async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, t
         if kind == "on_chat_model_stream":
             chunk = event["data"]["chunk"]
             langgraph_node = event["metadata"].get("langgraph_node", "")
-            # logger.info(chunk)
+            logger.info(chunk)
             # 过滤掉工具调用的参数生成过程 (agent 思考参数时 content 为空)
             if chunk.content and langgraph_node != "router":
                 ai_output += chunk.content
                 payload = json.dumps({'type': 'delta', "text": chunk.content}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
-        elif kind == "on_chat_model_end":
-            chunk = event["data"]["output"]
-            langgraph_node = event["metadata"]["langgraph_node"]
-            # if chunk.content and langgraph_node != "router":
-            # logger.info(f"[AI说]: {chunk.content}")
+        # elif kind == "on_chat_model_end":
+        #     chunk = event["data"]["output"]
+        #     langgraph_node = event["metadata"]["langgraph_node"]
+        # if chunk.content and langgraph_node != "router":
+        # logger.info(f"[AI说]: {chunk.content}")
         # --- 场景 2: 捕获工具调用 (可选，用于调试或前端展示 loading) ---
         elif kind == "on_tool_start":
-            tool_name = event["name"]
-            tool_inputs = event["data"].get("input")
+            # tool_name = event["name"]
+            # tool_inputs = event["data"].get("input")
             # logger.info(f"[正在调用工具]: {tool_name} 参数: {tool_inputs}")
-            # yield f"data: {json.dumps({"text": ' 正在调用工具...'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'processing', "text": '正在查询数据'}, ensure_ascii=False)}\n\n"
 
         # --- 场景 3: 捕获工具返回结果 (可选) ---
         elif kind == "on_tool_end":
             # 有些工具输出可能很长，截断打印日志
-            output = str(event["data"].get("output"))
-            # logger.info(f"[工具返回]: {output[:100]}...")
+            # output = str(event["data"].get("output"))
+            yield f"data: {json.dumps({'type': 'processing', "text": '正在整理数据'}, ensure_ascii=False)}\n\n"
 
         # except Exception as e:
         #     # yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -85,20 +109,19 @@ async def chat(ctx: AgentContext, background_tasks: BackgroundTasks, question, t
         # finally:
         # 流式结束
     if is_new_session:
-        background_tasks.add_task(
-            save_title,
-            llm=ctx.llm,
-            question=question,
-            answer=ai_output,
-            user_id=user_id,
-            thread_id=thread_id,
-            hotel_id=hotel_id
-        )
+        await save_title(llm=ctx.llm,
+                         question=question,
+                         answer=ai_output,
+                         user_id=user_id,
+                         thread_id=thread_id,
+                         hotel_id=hotel_id)
+
     # 存储进数据库
     history_id = None
     if ai_output:
         async with async_session_maker() as session:
-            new_history = ChatHistory(question=question, answer=ai_output, user_id=user_id, thread_id=thread_id)
+            new_history = ChatHistory(question=question, answer=ai_output, thread_id=thread_id, file_name=file_name)
+
             session.add(new_history)
             await session.commit()
             await session.refresh(new_history)
@@ -114,23 +137,7 @@ async def generate_session_title(llm: BaseChatModel, question: str, answer: str)
     根据用户的第一条消息生成简短的会话标题。
     """
 
-    # 1. 定义 Prompt
-    # 关键点：限制字数，强制要求不加标点，不加解释
-    prompt = ChatPromptTemplate.from_template(
-        """
-        你是一个专业的对话总结助手。请根据用户的输入内容，生成一个极简短的会话标题。
-
-        要求：
-        1. 长度控制在 10-15 个字以内。
-        2. 不要包含任何标点符号（如句号、引号）。
-        3. 不要包含“标题”、“关于”等前缀词。
-        4. 如果输入是无意义的问候（如“你好”），返回“新会话”。
-        5. 直接输出结果，不要有任何客套话。
-
-        用户输入: {question}
-        AI输出：{answer}
-        """
-    )
+    prompt = ChatPromptTemplate.from_template(TITLE_GENERATE_SYSTEM_PROMPT)
 
     # 2. 组装链 (Prompt -> LLM -> String)
     # 使用 StrOutputParser 直接拿回字符串，而不是 AIMessage 对象
@@ -144,7 +151,7 @@ async def generate_session_title(llm: BaseChatModel, question: str, answer: str)
         return title.strip().strip('"').strip("《").strip("》")
 
     except Exception as e:
-        print(f"生成标题失败: {e}")
+        logger.error(f"生成标题失败: {e}")
         # 如果 LLM 挂了，返回默认标题，不影响主流程
         return question[:15] if question else "新会话"
 

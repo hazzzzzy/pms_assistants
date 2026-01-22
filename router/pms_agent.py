@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Request, Query, BackgroundTasks
+from typing import Annotated
+
+from fastapi import APIRouter, Request, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
 from core.agent_context import AgentContext
-from schemas.pms_agent_schema import ChatRequest, DrawRequest, FeedbackRequest, HistoryTableResponse, HistoryTableRequest, HistoryFeedRequest, \
+from schemas.pms_agent_schema import DrawRequest, FeedbackRequest, HistoryTableResponse, HistoryTableRequest, HistoryFeedRequest, \
     HistoryFeedResponse, ThreadResponse, ThreadRequest, PresetQuestionResponse, PresetQuestionRequest
 from service import pms_agent_service
 from utils.R import BaseResponse
@@ -10,24 +12,22 @@ from utils.R import BaseResponse
 agent_router = APIRouter(prefix="/pms_agent", tags=["pms_agent"])
 
 
-@agent_router.post('/chat', summary='聊天', description='''
-## 先获取该用户的会话列表，假如有内容固定拿最早的会话作为历史记录，没有的话就为空
-## 新建对话——thread_id传入null
-## 继续对话——传入正确的thread_id
-''')
-async def chat(req: ChatRequest,
-               request: Request,
-               background_tasks: BackgroundTasks,
-               # hotel_id: str = Header(..., alias='hotel_id', description='酒店id'),
-               # user_id: str = Header(..., alias='user_id', description='员工id')
-               ):
+@agent_router.post('/chat', summary='聊天(支持文件)', description='支持上传xlsx进行分析')
+async def chat(
+        request: Request,
+        question: Annotated[str, Form(description="用户问题")],
+        hotel_id: Annotated[int, Form(description="酒店ID")],
+        user_id: Annotated[int, Form(description="用户ID")],
+        thread_id: Annotated[str | None, Form(description="会话ID，新建会话无需传递，继续会话需要传递")] = None,
+        file: Annotated[UploadFile | None, File(description="上传的Excel文件")] = None
+):
     context = AgentContext(request.app, include_graph=True)
-    gen = pms_agent_service.chat(context, background_tasks, req.question, req.thread_id, req.hotel_id, req.user_id)
+    gen = pms_agent_service.chat(context, file, question, thread_id, hotel_id, user_id)
     return StreamingResponse(gen, media_type="text/event-stream")
 
 
 @agent_router.post('/draw', deprecated=True)
-async def chat(request: Request, req: DrawRequest):
+async def draw(request: Request, req: DrawRequest):
     context = AgentContext(request.app, include_graph=True)
     return await pms_agent_service.draw(context, req.file_name)
 
@@ -37,7 +37,7 @@ async def get_history_feed(req: HistoryFeedRequest = Query()):
     return await pms_agent_service.get_history_feed(limit=req.limit, history_id=req.history_id, thread_id=req.thread_id)
 
 
-@agent_router.get('/get_history_table', response_model=BaseResponse[HistoryTableResponse], summary='获取聊天记录表格')
+@agent_router.get('/get_history_table', response_model=BaseResponse[HistoryTableResponse], summary='获取聊天记录表格', deprecated=True)
 async def get_history_table(req: HistoryTableRequest = Query()):
     return await pms_agent_service.get_history_table(limit=req.limit, page=req.page)
 

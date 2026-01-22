@@ -40,9 +40,9 @@ class Settings(BaseSettings):
     CHROMA_DB_PATH: str = abs_path("../asset/chroma_db")
     # 也可以在 .env 里覆盖这些路径，如果不覆盖就用上面的默认值
     GEN_TRY_TIMES: int = 3
+    MAX_FILE_SIZE_BYTES: int = 1 * 1024 * 1024
 
     # LangSmith 配置
-    # 注意：LangChain 官方推荐用 LANGCHAIN_API_KEY 这个名字，虽然 LANGSMITH_API_KEY 也能用
     DEEPSEEK_API_KEY: str = None
     LANGSMITH_API_KEY: str | None = None
     LANGCHAIN_TRACING_V2: str = "true"

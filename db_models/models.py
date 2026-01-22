@@ -10,16 +10,14 @@ from db_models.base_model import Base
 
 class ChatHistory(Base):
     __tablename__ = "chat_history"
-
-    # id 和 created_at 已经由 Base 提供，这里不需要再写！
-
     # 具体的业务字段
     question: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
     answer: Mapped[Optional[str]] = mapped_column(Text(collation="utf8mb4_bin"))
-    user_id: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
-    thread_id: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"))
-    feedback: Mapped[Optional[int]] = mapped_column(
-        TINYINT, server_default=text("'0'"), default=0, comment="0-无反馈 1-赞 2-踩"
+    # user_id: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"), nullable=True, default=None)
+    file_name: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"), nullable=True, default=None)
+    thread_id: Mapped[Optional[str]] = mapped_column(String(255, "utf8mb4_bin"), nullable=True, default=None)
+    feedback: Mapped[int] = mapped_column(
+        TINYINT, server_default=text("0"), default=0, comment="0-无反馈 1-赞 2-踩"
     )
 
 

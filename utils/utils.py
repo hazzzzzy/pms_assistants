@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import Header
 from pydantic import BaseModel, ConfigDict, Field
 
-from utils.R import R
+from R import R
 
 
 class AuthContext(BaseModel):

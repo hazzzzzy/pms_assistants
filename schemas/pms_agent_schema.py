@@ -1,14 +1,26 @@
 # schemas/chat.py
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from fastapi import Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 # =======================
 # 1. 请求参数 (Request)
 # =======================
+
+class RouteOut(BaseModel):
+    route: Literal["SQL", "CHAT"]
+    confidence: float = Field(ge=0, le=1)
+
+
+def parse_route(text: str) -> RouteOut | None:
+    try:
+        return RouteOut.model_validate_json(text)
+    except ValidationError:
+        return None
+
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", json_schema_extra={
@@ -16,13 +28,15 @@ class ChatRequest(BaseModel):
             "question": '今天天气怎么样',
             "thread_id": '123-123',
             'hotel_id': 100785,
-            'user_id': 1111
+            'user_id': 1111,
+            # 'user_thread_id': 1111,
         }
     })
     question: str = Field(..., description="用户问题")
     thread_id: str | None = Field(None, description="会话id")
     hotel_id: int = Field(..., ge=0, description="酒店id")
     user_id: int = Field(..., ge=0, description="员工id")
+    # user_thread_id: int | None = Field(None, description="用户与会话的关联ID")
 
 
 class DrawRequest(BaseModel):
@@ -33,14 +47,14 @@ class HistoryFeedRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", json_schema_extra={
         "example": {
             "history_id": 10086,
-            "thread_id": '111-xxx',
+            "thread_id": '123-123',
             "limit": 1
         }
     })
 
     limit: int = Query(10, ge=10, le=100, description="每页条数")
     history_id: Optional[int] = Query(None, description="若传入，则获取该id以前 {limit} 条数据")
-    thread_id: Optional[str] = Query(..., description="会话ID")
+    thread_id: str = Field(..., description="会话id")
 
 
 class HistoryTableRequest(BaseModel):
@@ -102,7 +116,6 @@ class PresetQuestionRequest(BaseModel):
 # =======================
 
 class HistorySchema(BaseModel):
-    # 关键配置：允许从 ORM 对象读取数据 (旧版叫 orm_mode = True)
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -110,12 +123,11 @@ class HistorySchema(BaseModel):
     answer: str
     created_at: datetime
     thread_id: str
-    user_id: int
+    file_name: str | None
     feedback: int
 
 
 class ThreadSchema(BaseModel):
-    # 关键配置：允许从 ORM 对象读取数据 (旧版叫 orm_mode = True)
     model_config = ConfigDict(from_attributes=True)
 
     id: int

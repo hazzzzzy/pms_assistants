@@ -2129,7 +2129,7 @@
       {
         "column_name": "state",
         "column_type": "tinyint",
-        "column_comment": "房间状态（4：空闲；2：待清洁脏房；3：维修；7：停用，99：删除）"
+        "column_comment": "房间状态（查询有效房间时必须排除 '99'（删除状态）。有效状态包括：4：空闲；2：待清洁脏房；3：维修；7：停用）"
       },
       {
         "column_name": "create_time",

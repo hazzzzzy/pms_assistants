@@ -15,5 +15,7 @@ psycopg-pool
 sentence-transformers
 
 pydantic-settings
-
+python-multipart
+pandas
+openpyxl
 tiktoken

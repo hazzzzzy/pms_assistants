@@ -11,6 +11,7 @@ from langgraph.prebuilt import ToolNode
 from core.agent_context import AgentContext
 from core.agent_prompt import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, ROUTER_PROMPT
 from core.agent_tools import pms_query_mysql, pms_search_vector
+from schemas.pms_agent_schema import parse_route
 
 logger = logging.getLogger(__name__)
 
@@ -91,31 +92,65 @@ class AgentInstance:
 
     async def chat_node(self, state: AgentState):
         messages = state['messages']
-        clean_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+        messages = [m for m in messages if not isinstance(m, SystemMessage)]
+        messages = [SystemMessage(content=CHAT_SYSTEM_PROMPT), *messages]
 
-        input_message = [SystemMessage(content=CHAT_SYSTEM_PROMPT)] + clean_messages
-        input_message = self.use_trimmer(input_message)
+        messages_without_tool = []
+        for msg in messages:
+            if isinstance(msg, ToolMessage):
+                continue
+            elif isinstance(msg, AIMessage) and msg.tool_calls:
+                continue
+            else:
+                messages_without_tool.append(msg)
 
-        response = await self.llm.ainvoke(input_message)
-        self.print_message(input_message + [response])
+        clean_messages = self.use_trimmer(messages_without_tool)
+
+        response = await self.llm.ainvoke(clean_messages)
+        self.print_message(clean_messages + [response])
         return {"messages": [response]}
 
     async def router_node(self, state: AgentState):
-        messages = state['messages']
-        question = messages[-1]
-        input_message = [SystemMessage(content=ROUTER_PROMPT), question]
-        response = await self.llm.ainvoke(input_message)
-        result = response.content.strip().lower()
-        if "sql" in result:
-            return {"next_node": "rag_sql_agent"}
-        else:
-            return {"next_node": "chat_agent"}
+        # messages = state['messages']
+        # last_2_msg = [msg for msg in messages if isinstance(msg, (AIMessage, HumanMessage))][-2:]
+        # input_message = [SystemMessage(content=ROUTER_PROMPT), *last_2_msg]
+        # response = await self.llm.ainvoke(input_message)
+        # result = response.content.strip().lower()
+        # if "SQL" in result:
+        #     return {"next_node": "rag_sql_agent"}
+        # else:
+        #     return {"next_node": "chat_agent"}
+        needed_messages = []
+        for msg in reversed(state["messages"]):
+            if isinstance(msg, HumanMessage):
+                needed_messages.append(msg)
+            elif isinstance(msg, AIMessage):
+                if not msg.tool_calls:
+                    needed_messages.append(msg)
+
+            if len(needed_messages) >= 3:
+                break
+        # last_2 = [m for m in state["messages"] if isinstance(m, (AIMessage, HumanMessage))][-4:]
+        prompt = ROUTER_PROMPT + "\n只输出一行 JSON: {\"route\":\"SQL|CHAT\",\"confidence\":0-1}"
+        resp = await self.llm.ainvoke([SystemMessage(content=prompt), *needed_messages])
+
+        parsed = parse_route((resp.content or "").strip())
+        if not parsed:
+            # 重试一次：更强约束
+            resp2 = await self.llm.ainvoke([SystemMessage(content=prompt + "\n再次强调：只能输出 JSON。"), *needed_messages])
+            parsed = parse_route((resp2.content or "").strip())
+
+        if not parsed:
+            return {"next_node": "chat_agent"}  # 回退
+
+        return {"next_node": "rag_sql_agent" if parsed.route == "SQL" else "chat_agent",
+                "route_meta": parsed.model_dump()}
 
     async def agent_node(self, state: AgentState):
         messages = state["messages"]
         clean_messages = [m for m in messages if not isinstance(m, SystemMessage)]
 
-        input_message = [SystemMessage(content=AGENT_SYSTEM_PROMPT)] + clean_messages
+        input_message = [SystemMessage(content=AGENT_SYSTEM_PROMPT), *clean_messages]
         input_message = self.use_trimmer(input_message)
         response = await self.llm_with_tools.ainvoke(input_message)
         if response.response_metadata.get('finish_reason') == 'stop':
@@ -208,5 +243,7 @@ class AgentInstance:
                     logger.info(content)
                 if tool_calls and len(msg.tool_calls) > 0:
                     logger.info(f"调用工具{msg.tool_calls[0]['name']}: {msg.tool_calls}")
+            elif isinstance(msg, ToolMessage):
+                logger.info(content)
             else:
-                logger.info(f"{content[:100]}...")
+                logger.info(f"{content[:200]}...")
