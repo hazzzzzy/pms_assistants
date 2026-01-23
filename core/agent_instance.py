@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Annotated, Literal, TypedDict
 
@@ -9,7 +10,7 @@ from langgraph.graph import StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
 
 from core.agent_context import AgentContext
-from core.agent_prompt import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, ROUTER_PROMPT
+from core.agent_prompt import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, ROUTER_PROMPT, SUMMARY_SYSTEM_PROMPT
 from core.agent_tools import pms_query_mysql, pms_search_vector
 from schemas.pms_agent_schema import parse_route
 
@@ -111,63 +112,84 @@ class AgentInstance:
         return {"messages": [response]}
 
     async def router_node(self, state: AgentState):
-        # messages = state['messages']
-        # last_2_msg = [msg for msg in messages if isinstance(msg, (AIMessage, HumanMessage))][-2:]
-        # input_message = [SystemMessage(content=ROUTER_PROMPT), *last_2_msg]
-        # response = await self.llm.ainvoke(input_message)
-        # result = response.content.strip().lower()
-        # if "SQL" in result:
-        #     return {"next_node": "rag_sql_agent"}
-        # else:
-        #     return {"next_node": "chat_agent"}
         needed_messages = []
         for msg in reversed(state["messages"]):
             if isinstance(msg, HumanMessage):
-                needed_messages.append(msg)
+                content = msg.content or ""
+                marker = "用户问题："
+                if marker in content:
+                    content = content.split(marker, 1)[-1].strip()
+                needed_messages.append(HumanMessage(content=content))
             elif isinstance(msg, AIMessage):
                 if not msg.tool_calls:
                     needed_messages.append(msg)
 
             if len(needed_messages) >= 3:
                 break
-        # last_2 = [m for m in state["messages"] if isinstance(m, (AIMessage, HumanMessage))][-4:]
-        prompt = ROUTER_PROMPT + "\n只输出一行 JSON: {\"route\":\"SQL|CHAT\",\"confidence\":0-1}"
-        resp = await self.llm.ainvoke([SystemMessage(content=prompt), *needed_messages])
+        resp = await self.llm.ainvoke([SystemMessage(content=ROUTER_PROMPT), *reversed(needed_messages)])
 
         parsed = parse_route((resp.content or "").strip())
+        logger.warning(resp.content)
+        logger.warning(parsed)
         if not parsed:
             # 重试一次：更强约束
-            resp2 = await self.llm.ainvoke([SystemMessage(content=prompt + "\n再次强调：只能输出 JSON。"), *needed_messages])
+            resp2 = await self.llm.ainvoke([SystemMessage(content=ROUTER_PROMPT + "\n再次强调：只能输出 JSON。"), *reversed(needed_messages)])
             parsed = parse_route((resp2.content or "").strip())
 
         if not parsed:
             return {"next_node": "chat_agent"}  # 回退
 
-        return {"next_node": "rag_sql_agent" if parsed.route == "SQL" else "chat_agent",
-                "route_meta": parsed.model_dump()}
+        return {"next_node": "rag_sql_agent" if parsed.route == "SQL" else "chat_agent"}
 
     async def agent_node(self, state: AgentState):
         messages = state["messages"]
-        clean_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+        messages = [m for m in messages if not isinstance(m, SystemMessage)]
+        messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT), *messages]
 
-        input_message = [SystemMessage(content=AGENT_SYSTEM_PROMPT), *clean_messages]
-        input_message = self.use_trimmer(input_message)
-        response = await self.llm_with_tools.ainvoke(input_message)
+        clean_messages = self.use_trimmer(messages)
+        response = await self.llm_with_tools.ainvoke(clean_messages)
         if response.response_metadata.get('finish_reason') == 'stop':
-            self.print_message(input_message + [response])
+            self.print_message(clean_messages + [response])
 
         return {"messages": [response]}
 
-    @staticmethod
-    def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
-        messages = state["messages"]
-        last_message = messages[-1]
+    async def summarize_node(self, state: AgentState):
+        # 取最后一个用户问题
+        question = None
+        for m in reversed(state["messages"]):
+            if isinstance(m, HumanMessage):
+                question = m.content
+                break
 
-        # 如果 LLM 的回复里包含 tool_calls，说明它想查库 -> 转去工具节点
-        if last_message.tool_calls:
+        # 取 SQL Agent 最后一次“非tool_calls”的 AIMessage 作为中间JSON
+        payload = None
+        for m in reversed(state["messages"]):
+            if isinstance(m, AIMessage) and not m.tool_calls and (m.content or "").strip():
+                txt = (m.content or "").strip()
+                try:
+                    payload = json.loads(txt)
+                except Exception:
+                    payload = None
+                break
+        logger.warning(payload)
+        if not payload or not isinstance(payload, dict) or "safe_data" not in payload:
+            # 中间结果缺失，按失败处理
+            return {"messages": [AIMessage(content="暂无相关数据，请点击下方👎️反馈给我们")]}
+
+        prompt = SUMMARY_SYSTEM_PROMPT
+        inp = [
+            SystemMessage(content=prompt),
+            HumanMessage(content=f"用户问题：{question}\n\n中间数据：{json.dumps(payload, ensure_ascii=False)}")
+        ]
+        resp = await self.llm.ainvoke(inp)
+        return {"messages": [resp]}
+
+    @staticmethod
+    def should_continue(state: AgentState) -> Literal["tools", "summarize"]:
+        last_message = state["messages"][-1]
+        if isinstance(last_message, AIMessage) and last_message.tool_calls:
             return "tools"
-        # 否则说明它觉得信息够了，已经生成了最终文本 -> 结束
-        return "__end__"
+        return "summarize"
 
     def build(self, ctx: AgentContext, checkpointer=None):
         tools = self.init_tools_and_llm(ctx)
@@ -177,6 +199,7 @@ class AgentInstance:
         workflow.add_node("rag_sql_agent", self.agent_node)
         workflow.add_node("chat_agent", self.chat_node)
         workflow.add_node("router", self.router_node)
+        workflow.add_node("summarize", self.summarize_node)
 
         tool_node = ToolNode(tools)
         workflow.add_node("tools", tool_node)
@@ -193,9 +216,11 @@ class AgentInstance:
         workflow.add_conditional_edges(
             "rag_sql_agent",
             self.should_continue,
+            {"tools": "tools", "summarize": "summarize"}
         )
         workflow.add_edge("tools", "rag_sql_agent")
-        workflow.add_edge("chat_agent", END)  # 答案生成完 -> 结束
+        workflow.add_edge("chat_agent", END)
+        workflow.add_edge("summarize", END)
 
         app = workflow.compile(checkpointer=checkpointer)
         return app

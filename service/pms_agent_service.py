@@ -13,7 +13,7 @@ from sqlalchemy import desc, func, select
 
 from config.config import settings
 from core.agent_context import AgentContext
-from core.agent_prompt import AGENT_SYSTEM_PROMPT, AGENT_USER_PROMPT, TITLE_GENERATE_SYSTEM_PROMPT
+from core.agent_prompt import USER_PROMPT, TITLE_GENERATE_SYSTEM_PROMPT, ROUTER_PROMPT
 from core.db import db_session, async_session_maker
 from db_models.models import ChatHistory, UserThread, PresetQuestion
 from utils.R import R
@@ -23,28 +23,33 @@ logger = logging.getLogger(__name__)
 
 
 async def parse_excel(file):
-    if file:
-        if not file.filename.endswith(('.xlsx', '.xls')):
-            return R.fail('只支持 xlsx/xls 文件')
+    file_name, file_context, err = None, None, None
+    try:
+        if file:
+            file_name = file.filename
+            if not file_name.endswith(('.xlsx', '.xls')):
+                raise Exception('只支持 xlsx/xls 文件')
 
-        content = await file.read()
-        if len(content) > settings.MAX_FILE_SIZE_BYTES:
-            return R.fail(f"文件实际大小超过限制 ({settings.MAX_FILE_SIZE_BYTES} MB)")
+            content = await file.read()
+            if len(content) > settings.MAX_FILE_SIZE_BYTES:
+                raise Exception(f"文件实际大小超过限制 ({settings.MAX_FILE_SIZE_BYTES} MB)")
 
-        # 解析 Excel
-        df = pd.read_excel(io.BytesIO(content))
-        df = df.fillna("")  # 填充空值
-        file_md = df.to_markdown(index=False)
+            # 解析 Excel
+            df = pd.read_excel(io.BytesIO(content))
+            df = df.fillna("")  # 填充空值
+            file_md = df.to_markdown(index=False)
 
-        file_context = f"\n\n【用户上传的文件内容】:\n{file_md}\n\n"
-        return file.filename, file_context
-    else:
-        return None, ''
+            file_context = f"用户上传的文件内容:\n{file_md}\n"
+    except Exception as e:
+        err = e
+    return file_name, file_context, err
 
 
 async def chat(ctx: AgentContext, file, question, thread_id, hotel_id, user_id):
-    file_name, file_content = await parse_excel(file)
-
+    file_name, file_content, err = await parse_excel(file)
+    if err:
+        yield f"data: {json.dumps({'type': 'delta', "text": err}, ensure_ascii=False)}\n\n"
+        return
     is_new_session = not bool(thread_id)
     thread_id = thread_id if thread_id else str(uuid.uuid4())
     thread_id_json = json.dumps({"type": 'meta', 'thread_id': thread_id}, ensure_ascii=False)
@@ -54,10 +59,10 @@ async def chat(ctx: AgentContext, file, question, thread_id, hotel_id, user_id):
     inputs = {
         "messages": [
             SystemMessage(
-                id="sys_prompt", content=AGENT_SYSTEM_PROMPT.format(hotel_id)
+                id="sys_prompt", content=ROUTER_PROMPT
             ),
             HumanMessage(
-                content=AGENT_USER_PROMPT.format(current_time, hotel_id, user_id, question + file_content)
+                content=USER_PROMPT.format(current_time, hotel_id, user_id, file_content, question)
             ),
         ]
     }
@@ -80,10 +85,12 @@ async def chat(ctx: AgentContext, file, question, thread_id, hotel_id, user_id):
             langgraph_node = event["metadata"].get("langgraph_node", "")
             logger.info(chunk)
             # 过滤掉工具调用的参数生成过程 (agent 思考参数时 content 为空)
-            if chunk.content and langgraph_node != "router":
+            if chunk.content and langgraph_node in {"summarize", "chat_agent"}:
                 ai_output += chunk.content
-                payload = json.dumps({'type': 'delta', "text": chunk.content}, ensure_ascii=False)
-                yield f"data: {payload}\n\n"
+                yield f"data: {json.dumps({'type': 'delta', "text": chunk.content}, ensure_ascii=False)}\n\n"
+            elif chunk.content and langgraph_node == 'rag_sql_agent':
+                yield f"data: {json.dumps({'type': 'processing', "text": '正在整理结果'}, ensure_ascii=False)}\n\n"
+
         # elif kind == "on_chat_model_end":
         #     chunk = event["data"]["output"]
         #     langgraph_node = event["metadata"]["langgraph_node"]
@@ -100,7 +107,7 @@ async def chat(ctx: AgentContext, file, question, thread_id, hotel_id, user_id):
         elif kind == "on_tool_end":
             # 有些工具输出可能很长，截断打印日志
             # output = str(event["data"].get("output"))
-            yield f"data: {json.dumps({'type': 'processing', "text": '正在整理数据'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'processing', "text": '正在校验数据'}, ensure_ascii=False)}\n\n"
 
         # except Exception as e:
         #     # yield f"data: {json.dumps({'error': str(e)})}\n\n"
