@@ -40,7 +40,6 @@ class AgentInstance:
         other_messages = [m for m in messages if not isinstance(m, SystemMessage)]
 
         question = None
-        # question = messages[-1] if isinstance(messages[-1], HumanMessage) else None
         for msg in reversed(messages):
             if isinstance(msg, HumanMessage):
                 question = msg
@@ -63,32 +62,27 @@ class AgentInstance:
         active_tool_call_ids = set()
         for i, msg in enumerate(trimmed_messages):
             if isinstance(msg, AIMessage):
-                valid_messages.append(msg)
-                # 如果这条 AI 消息发起了调用，记录 ID
                 if msg.tool_calls:
-                    active_tool_call_ids = {call['id'] for call in msg.tool_calls}
+                    if i + 1 < len(trimmed_messages):
+                        next_msg = trimmed_messages[i + 1]
+                        current_tool_call_ids = {call['id'] for call in msg.tool_calls}
+                        if isinstance(next_msg, ToolMessage):
+                            if next_msg.tool_call_id in current_tool_call_ids:
+                                valid_messages.append(msg)
+                                active_tool_call_ids = current_tool_call_ids
                 else:
-                    active_tool_call_ids = set()
+                    valid_messages.append(msg)
             elif isinstance(msg, ToolMessage):
-                # 检查这条工具消息的 ID 是否在刚才记录的 ID 集合里
                 if msg.tool_call_id in active_tool_call_ids:
                     valid_messages.append(msg)
-                    # 注意：这里不能从 set 里移除 ID，因为有时候模型可能会重试（虽然少见），
-                    # 或者如果你为了保险，不移除也没事。
-            else:
+            elif isinstance(msg, HumanMessage):
                 valid_messages.append(msg)
-                # 遇到 Human 消息通常意味着一轮对话结束，重置 ID 集合
                 if isinstance(msg, HumanMessage):
                     active_tool_call_ids = set()
 
         if question and question not in valid_messages:
-            valid_messages = [question] + valid_messages
-        # return system_message + final_messages
-        # _ = system_message + valid_messages
-        # for msg in _:
-        #     msg_type = msg.type.upper()
-        #     msg_content = msg.content
-        # logger.info(f'{msg_type}: {msg_content}\n')
+            valid_messages = [question, *valid_messages]
+
         return system_message + valid_messages
 
     async def chat_node(self, state: AgentState):
@@ -129,8 +123,6 @@ class AgentInstance:
         resp = await self.llm.ainvoke([SystemMessage(content=ROUTER_PROMPT), *reversed(needed_messages)])
 
         parsed = parse_route((resp.content or "").strip())
-        logger.warning(resp.content)
-        logger.warning(parsed)
         if not parsed:
             # 重试一次：更强约束
             resp2 = await self.llm.ainvoke([SystemMessage(content=ROUTER_PROMPT + "\n再次强调：只能输出 JSON。"), *reversed(needed_messages)])
@@ -147,6 +139,7 @@ class AgentInstance:
         messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT), *messages]
 
         clean_messages = self.use_trimmer(messages)
+        logger.info(clean_messages)
         response = await self.llm_with_tools.ainvoke(clean_messages)
         if response.response_metadata.get('finish_reason') == 'stop':
             self.print_message(clean_messages + [response])
@@ -252,11 +245,6 @@ class AgentInstance:
 
     @staticmethod
     def print_message(msg_list):
-        # if len(msg_list) != 0:
-        #     last_msg = msg_list[-1]
-        #     logger.info(f'11111111111{last_msg}')
-        #     if isinstance(last_msg, AIMessage):
-        #         if last_msg.response_metadata.get('finish_reason') == 'stop':
         for i, msg in enumerate(msg_list):
             msg_type = msg.type.upper()
             logger.info(f'*****************[{i + 1}]  {msg_type}*******************')
@@ -265,10 +253,10 @@ class AgentInstance:
             tool_calls = hasattr(msg, "tool_calls")
             if isinstance(msg, AIMessage):
                 if len(content) > 1:
-                    logger.info(content)
+                    logger.info(msg)
                 if tool_calls and len(msg.tool_calls) > 0:
                     logger.info(f"调用工具{msg.tool_calls[0]['name']}: {msg.tool_calls}")
             elif isinstance(msg, ToolMessage):
-                logger.info(content)
+                logger.info(msg)
             else:
                 logger.info(f"{content[:200]}...")

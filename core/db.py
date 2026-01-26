@@ -15,7 +15,9 @@ from config.config import settings
 
 class ChromaInstance:
     def __init__(self):
-        self.model = HuggingFaceEmbeddings(model_name=settings.MODEL_PATH)
+        self.model = HuggingFaceEmbeddings(model_name=settings.MODEL_PATH,
+                                           # 开启向量归一
+                                           encode_kwargs={'normalize_embeddings': True})
 
     def load_vectorstore(self, collection_name):
         """为表结构数据创建向量存储"""
@@ -24,7 +26,7 @@ class ChromaInstance:
             embedding_function=self.model,
             persist_directory=settings.CHROMA_DB_PATH,
             collection_name=collection_name,
-            client_settings=Settings(anonymized_telemetry=False)
+            client_settings=Settings(anonymized_telemetry=False),
         )
         return vectorstore
 

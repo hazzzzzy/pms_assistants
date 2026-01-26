@@ -71,6 +71,7 @@ def pms_search_vector(ctx: AgentContext):
         # schema_search_result = vs_schema.similarity_search_with_score(query, k=k)
         schema_search_result = await vs_schema.amax_marginal_relevance_search(query=query, k=k, fetch_k=20,
                                                                               lambda_mult=0.5)
+        # qa_query = f'为这个句子生成表示以用于检索相关文章：{query}'
         qa_search_result = await vs_qa.asimilarity_search_with_score(query, k=k)
 
         # 分数越低越相关

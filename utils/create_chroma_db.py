@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 import time
 
 from langchain_chroma import Chroma
@@ -10,7 +12,11 @@ SQL_FILE_PATH = '../asset/tables_enriched.json'
 QA_FILE_PATH = '../asset/qa_sql.json'
 
 start_time = time.time()
-model = HuggingFaceEmbeddings(model_name='../models/bge-base-zh-v1.5')
+if os.path.exists(CHROMA_DB_PATH):
+    shutil.rmtree(CHROMA_DB_PATH)
+    print(f"已清空旧数据库: {CHROMA_DB_PATH}")
+
+model = HuggingFaceEmbeddings(model_name='../models/bge-base-zh-v1.5', encode_kwargs={'normalize_embeddings': True})
 
 with open(SQL_FILE_PATH, 'r', encoding='utf-8') as f:
     sql_data = json.load(f)
@@ -38,7 +44,7 @@ for table in sql_data:
     # content = "\n".join(content_parts)
 
     # 创建文档对象
-    doc = Document(
+    sql_doc = Document(
         page_content=table_description,
         metadata={
             "table_structure": table_structure,
@@ -47,19 +53,19 @@ for table in sql_data:
             # "type": "table_structure"
         }
     )
-    sql_docs.append(doc)
+    sql_docs.append(sql_doc)
 
 for qa in qa_data:
     q = qa['q']
     a = qa['a']
-    doc = Document(
+    qa_doc = Document(
         page_content=q,
         metadata={
-            'a': a,
+            'answer': a,
             'remark': qa['remark']
         }
     )
-    qa_docs.append(doc)
+    qa_docs.append(qa_doc)
 
 # 加载JSON格式的表结构数据
 collections = {
