@@ -139,7 +139,6 @@ class AgentInstance:
         messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT), *messages]
 
         clean_messages = self.use_trimmer(messages)
-        logger.info(clean_messages)
         response = await self.llm_with_tools.ainvoke(clean_messages)
         if response.response_metadata.get('finish_reason') == 'stop':
             self.print_message(clean_messages + [response])
@@ -159,13 +158,14 @@ class AgentInstance:
         for m in reversed(state["messages"]):
             if isinstance(m, AIMessage) and not m.tool_calls and (m.content or "").strip():
                 txt = (m.content or "").strip()
+                logger.info(txt)
                 try:
                     payload = json.loads(txt)
                 except Exception:
                     payload = None
                 break
         logger.warning(payload)
-        if not payload or not isinstance(payload, dict) or "safe_data" not in payload:
+        if not payload or not isinstance(payload, dict):
             # 中间结果缺失，按失败处理
             return {"messages": [AIMessage(content="暂无相关数据，请点击下方👎️反馈给我们")]}
 

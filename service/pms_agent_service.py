@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 async def parse_excel(file):
-    file_name, file_context, err = None, None, None
+    file_name, file_context, err = None, '', None
     try:
         if file:
             file_name = file.filename
@@ -49,6 +49,7 @@ async def chat(ctx: AgentContext, file, question, thread_id, hotel_id, user_id):
     file_name, file_content, err = await parse_excel(file)
     if err:
         yield f"data: {json.dumps({'type': 'delta', "text": err}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
         return
     is_new_session = not bool(thread_id)
     thread_id = thread_id if thread_id else str(uuid.uuid4())
@@ -71,72 +72,66 @@ async def chat(ctx: AgentContext, file, question, thread_id, hotel_id, user_id):
         "recursion_limit": 50,
     }
     ai_output = ""
-    # todo: 生产环境需要把异常捕获还原
-    # try:
-    async for event in ctx.graph.astream_events(
-            inputs, version="v2", config=agent_config
-    ):
-        kind = event["event"]
-        # if kind != "on_chat_model_stream":
-        # logger.info(event)
-        # --- 场景 1: 捕获 LLM 的流式吐字 (打字机效果) ---
-        if kind == "on_chat_model_stream":
-            chunk = event["data"]["chunk"]
-            langgraph_node = event["metadata"].get("langgraph_node", "")
-            logger.info(chunk)
-            # 过滤掉工具调用的参数生成过程 (agent 思考参数时 content 为空)
-            if chunk.content and langgraph_node in {"summarize", "chat_agent"}:
-                ai_output += chunk.content
-                yield f"data: {json.dumps({'type': 'delta', "text": chunk.content}, ensure_ascii=False)}\n\n"
-            elif chunk.content and langgraph_node == 'rag_sql_agent':
-                yield f"data: {json.dumps({'type': 'processing', "text": '正在整理结果'}, ensure_ascii=False)}\n\n"
+    try:
+        async for event in ctx.graph.astream_events(
+                inputs, version="v2", config=agent_config
+        ):
+            kind = event["event"]
+            # --- 场景 1: 捕获 LLM 的流式吐字 (打字机效果) ---
+            if kind == "on_chat_model_stream":
+                chunk = event["data"]["chunk"]
+                langgraph_node = event["metadata"].get("langgraph_node", "")
+                # 过滤掉工具调用的参数生成过程 (agent 思考参数时 content 为空)
+                if chunk.content and langgraph_node in {"summarize", "chat_agent"}:
+                    ai_output += chunk.content
+                    yield f"data: {json.dumps({'type': 'delta', "text": chunk.content}, ensure_ascii=False)}\n\n"
+                # elif chunk.content and langgraph_node == 'rag_sql_agent':
+                #     yield f"data: {json.dumps({'type': 'processing', "text": '正在整理结果'}, ensure_ascii=False)}\n\n"
 
-        # elif kind == "on_chat_model_end":
-        #     chunk = event["data"]["output"]
-        #     langgraph_node = event["metadata"]["langgraph_node"]
-        # if chunk.content and langgraph_node != "router":
-        # logger.info(f"[AI说]: {chunk.content}")
-        # --- 场景 2: 捕获工具调用 (可选，用于调试或前端展示 loading) ---
-        elif kind == "on_tool_start":
-            # tool_name = event["name"]
-            # tool_inputs = event["data"].get("input")
-            # logger.info(f"[正在调用工具]: {tool_name} 参数: {tool_inputs}")
-            yield f"data: {json.dumps({'type': 'processing', "text": '正在查询数据'}, ensure_ascii=False)}\n\n"
+            elif kind == "on_chat_model_end":
+                chunk = event["data"]["output"]
+                langgraph_node = event["metadata"]["langgraph_node"]
+                if chunk.content and langgraph_node != "router":
+                    logger.info(chunk)
+            # --- 场景 2: 捕获工具调用 (可选，用于调试或前端展示 loading) ---
+            elif kind == "on_tool_start":
+                # tool_name = event["name"]
+                # tool_inputs = event["data"].get("input")
+                # logger.info(f"[正在调用工具]: {tool_name} 参数: {tool_inputs}")
+                yield f"data: {json.dumps({'type': 'processing', "text": '正在查询数据'}, ensure_ascii=False)}\n\n"
 
-        # --- 场景 3: 捕获工具返回结果 (可选) ---
-        elif kind == "on_tool_end":
-            # 有些工具输出可能很长，截断打印日志
-            # output = str(event["data"].get("output"))
-            yield f"data: {json.dumps({'type': 'processing', "text": '正在校验数据'}, ensure_ascii=False)}\n\n"
+            # --- 场景 3: 捕获工具返回结果 (可选) ---
+            elif kind == "on_tool_end":
+                # 有些工具输出可能很长，截断打印日志
+                # output = str(event["data"].get("output"))
+                yield f"data: {json.dumps({'type': 'processing', "text": '正在校验数据'}, ensure_ascii=False)}\n\n"
 
-        # except Exception as e:
-        #     # yield f"data: {json.dumps({'error': str(e)})}\n\n"
-        #     logger.error(e)
-        #     yield f"data: {json.dumps({'type': 'delta','error': str(e)})}\n\n"
-        # finally:
-        # 流式结束
-    if is_new_session:
-        await save_title(llm=ctx.llm,
-                         question=question,
-                         answer=ai_output,
-                         user_id=user_id,
-                         thread_id=thread_id,
-                         hotel_id=hotel_id)
+        if is_new_session:
+            await save_title(llm=ctx.llm,
+                             question=question,
+                             answer=ai_output,
+                             user_id=user_id,
+                             thread_id=thread_id,
+                             hotel_id=hotel_id)
 
-    # 存储进数据库
-    history_id = None
-    if ai_output:
-        async with async_session_maker() as session:
-            new_history = ChatHistory(question=question, answer=ai_output, thread_id=thread_id, file_name=file_name)
+        # 存储进数据库
+        history_id = None
+        if ai_output:
+            async with async_session_maker() as session:
+                new_history = ChatHistory(question=question, answer=ai_output, thread_id=thread_id, file_name=file_name)
 
-            session.add(new_history)
-            await session.commit()
-            await session.refresh(new_history)
-            history_id = new_history.id
-    if history_id:
-        history_id_json = json.dumps({"type": 'meta', 'history_id': history_id}, ensure_ascii=False)
-        yield f"data: {history_id_json}\n\n"
-    yield "data: [DONE]\n\n"
+                session.add(new_history)
+                await session.commit()
+                await session.refresh(new_history)
+                history_id = new_history.id
+        if history_id:
+            history_id_json = json.dumps({"type": 'meta', 'history_id': history_id}, ensure_ascii=False)
+            yield f"data: {history_id_json}\n\n"
+    except Exception as e:
+        logger.error(e, exc_info=True)
+        yield f"data: {json.dumps({'type': 'delta', 'text': '\n\n[系统] 服务端发生异常，请稍后重试。'})}\n\n"
+    finally:
+        yield "data: [DONE]\n\n"
 
 
 async def generate_session_title(llm: BaseChatModel, question: str, answer: str) -> str:
@@ -158,7 +153,7 @@ async def generate_session_title(llm: BaseChatModel, question: str, answer: str)
         return title.strip().strip('"').strip("《").strip("》")
 
     except Exception as e:
-        logger.error(f"生成标题失败: {e}")
+        logger.error(f"生成标题失败: {e}", exc_info=True)
         # 如果 LLM 挂了，返回默认标题，不影响主流程
         return question[:15] if question else "新会话"
 

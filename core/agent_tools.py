@@ -44,22 +44,22 @@ async def pms_query_mysql(query: str):
 
 def pms_search_vector(ctx: AgentContext):
     @tool
-    async def agent_search_vector(query: str, k: int = 5, schema_min_score: float = 2.0, qa_min_score: float = 0.5):
+    async def agent_search_vector(query: str, k: int = 5, qa_min_score: float = 0.85):
         """
         这是一个向量数据库检索工具,基于语义相似度检索表结构与预设问答sql向量数据库中的相关文档。
         仅供查询酒店内部相关数据时使用，例如经营数据、房态数据、酒店房间元数据等等
         当需要理解表结构、字段含义时，则必须使用此工具
+        返回一个键值对，包含检索到的{k}个表结构与提问相似问答对，你需要根据问答对来规划下一步行动
 
         Args:
             query (str): 需要检索的查询文本（如用户的问题或关键词）。
             k (int): 返回的相关表结构与预设问答sql文档数量，默认值5
-            schema_min_score (float): 表结构文档的分数阈值，分数越低表示越相关，默认值2.0。
-            qa_min_score (float): 预设问答sql文档的分数阈值，分数越低表示越相关，默认值0.5。
+            qa_min_score (float): 预设问答sql文档的分数阈值，分数越低表示越相关，默认值0.85。
 
         Returns:
             dict: {
-                    'schema_result': List[Document],   # 表结构文档
-                    'qa_result': List[Document]       # 预设问答sql文档
+                    'schema_result': str,   # 表结构文档
+                    'qa_result': str       # 预设问答sql文档
                     }
         """
         # logger.info(f"[工具调用] 正在检索向量数据库: {query}")
@@ -68,24 +68,23 @@ def pms_search_vector(ctx: AgentContext):
         if vs_schema is None or vs_qa is None:
             raise Exception('初始化未完成')
 
-        # schema_search_result = vs_schema.similarity_search_with_score(query, k=k)
-        schema_search_result = await vs_schema.amax_marginal_relevance_search(query=query, k=k, fetch_k=20,
-                                                                              lambda_mult=0.5)
-        # qa_query = f'为这个句子生成表示以用于检索相关文章：{query}'
+        # instruction = f'为这个句子生成表示以用于检索相关文章：{query}'
+        schema_search_result = await vs_schema.asimilarity_search(query, k=k)
+        # schema_search_result = await vs_schema.amax_marginal_relevance_search(query=query, k=k, fetch_k=20,
+        #                                                                       lambda_mult=0.5)
         qa_search_result = await vs_qa.asimilarity_search_with_score(query, k=k)
 
         # 分数越低越相关
         schema_result, qa_result = '', ''
         for doc in schema_search_result:
-            # if score < schema_min_score:
-            # logger.info(doc.metadata['table_name'])
             doc = f'表名：{doc.metadata['table_name']}\n表中文名：{doc.metadata['table_zh_name']}\n表结构：{doc.metadata['table_structure']}\n'
             schema_result += doc
+
+        index_ = 0
         for doc, score in qa_search_result:
-            # logger.info([doc, score])
+            index_ += 1
             if score <= qa_min_score:
-                # logger.info(doc.metadata['table_name'])
-                doc = f'该句sql的对应场景：{doc.page_content}\n备注：{doc.metadata['remark']}\nsql内容：{doc.metadata['a']}\n'
+                doc = f'{index_}. -该句sql的对应场景：{doc.page_content}\n-备注：{doc.metadata['remark']}\n-sql内容：{doc.metadata['answer']}\n\n'
                 qa_result += doc
         return {'qa_result': qa_result, 'schema_result': schema_result}
 
