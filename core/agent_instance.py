@@ -13,6 +13,7 @@ from core.agent_context import AgentContext
 from core.agent_prompt import AGENT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, ROUTER_PROMPT, SUMMARY_SYSTEM_PROMPT
 from core.agent_tools import pms_query_mysql, pms_search_vector
 from schemas.pms_agent_schema import parse_route
+from utils.utils import get_valid_json
 
 logger = logging.getLogger(__name__)
 
@@ -156,22 +157,19 @@ class AgentInstance:
         # 取 SQL Agent 最后一次“非tool_calls”的 AIMessage 作为中间JSON
         payload = None
         for m in reversed(state["messages"]):
-            if isinstance(m, AIMessage) and not m.tool_calls and (m.content or "").strip():
-                txt = (m.content or "").strip()
-                logger.info(txt)
-                try:
-                    payload = json.loads(txt)
-                except Exception:
-                    payload = None
+            m_content = (m.content or '').strip()
+            if isinstance(m, AIMessage) and not m.tool_calls and m_content:
+                logger.warning(f'回答：{m_content}')
+                payload = get_valid_json(m_content)
+                logger.warning(f'解析内容：{payload}')
                 break
-        logger.warning(payload)
+
         if not payload or not isinstance(payload, dict):
             # 中间结果缺失，按失败处理
-            return {"messages": [AIMessage(content="暂无相关数据，请点击下方👎️反馈给我们")]}
+            return {"messages": [AIMessage(content="暂无相关数据，请点击消息下方👎️反馈给我们")]}
 
-        prompt = SUMMARY_SYSTEM_PROMPT
         inp = [
-            SystemMessage(content=prompt),
+            SystemMessage(content=SUMMARY_SYSTEM_PROMPT),
             HumanMessage(content=f"用户问题：{question}\n\n中间数据：{json.dumps(payload, ensure_ascii=False)}")
         ]
         resp = await self.llm.ainvoke(inp)
@@ -218,7 +216,6 @@ class AgentInstance:
         app = workflow.compile(checkpointer=checkpointer)
         return app
 
-    # 1. 定义一个独立的计数函数 (放在类外面或者静态方法都可以)
     @staticmethod
     def count_tokens(messages: list[BaseMessage]) -> int:
         """

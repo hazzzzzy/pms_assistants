@@ -1,0 +1,16 @@
+services:
+  # FastAPI 应用
+  pms-assistants:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pms_assistants_app
+    volumes:
+      - .:/app
+    network_mode: host  # 使用宿主机网络 (注意：此时 ports 配置会被忽略)
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"

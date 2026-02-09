@@ -63,8 +63,16 @@ async def create_async_postgres_engine() -> AsyncPostgresSaver:
     # 【关键修改】把 pool 绑在 check_pointer 上，
     check_pointer.pool_ref = pool
 
-    # !!! 关键：首次启动自动建表 !!!
-    await check_pointer.setup()
+    # !!! 关键：首次启动自动建表，出现重复键异常则忽略 !!!
+    try:
+        await check_pointer.setup()
+    except Exception as e:
+        if "duplicate key" in str(e) or "already exists" in str(e):
+            # 表已存在，无需重复创建
+            pass
+        else:
+            # 其他异常需要抛出
+            raise
     return check_pointer
 
 
