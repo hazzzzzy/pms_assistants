@@ -121,9 +121,12 @@ class AgentInstance:
 
             if len(needed_messages) >= 3:
                 break
+
+        logger.warning([SystemMessage(content=ROUTER_PROMPT), *reversed(needed_messages)])
         resp = await self.llm.ainvoke([SystemMessage(content=ROUTER_PROMPT), *reversed(needed_messages)])
 
         parsed = parse_route((resp.content or "").strip())
+        logger.warning(parsed)
         if not parsed:
             # 重试一次：更强约束
             resp2 = await self.llm.ainvoke([SystemMessage(content=ROUTER_PROMPT + "\n再次强调：只能输出 JSON。"), *reversed(needed_messages)])
@@ -153,15 +156,12 @@ class AgentInstance:
             if isinstance(m, HumanMessage):
                 question = m.content
                 break
-
         # 取 SQL Agent 最后一次“非tool_calls”的 AIMessage 作为中间JSON
         payload = None
         for m in reversed(state["messages"]):
             m_content = (m.content or '').strip()
             if isinstance(m, AIMessage) and not m.tool_calls and m_content:
-                logger.warning(f'回答：{m_content}')
                 payload = get_valid_json(m_content)
-                logger.warning(f'解析内容：{payload}')
                 break
 
         if not payload or not isinstance(payload, dict):

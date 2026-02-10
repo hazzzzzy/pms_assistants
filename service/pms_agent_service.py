@@ -88,11 +88,11 @@ async def chat(ctx: AgentContext, file, question, thread_id, hotel_id, user_id):
                 # elif chunk.content and langgraph_node == 'rag_sql_agent':
                 #     yield f"data: {json.dumps({'type': 'processing', "text": '正在整理结果'}, ensure_ascii=False)}\n\n"
 
-            elif kind == "on_chat_model_end":
-                chunk = event["data"]["output"]
-                langgraph_node = event["metadata"]["langgraph_node"]
-                if chunk.content and langgraph_node != "router":
-                    logger.info(chunk)
+            # elif kind == "on_chat_model_end":
+            #     chunk = event["data"]["output"]
+            #     langgraph_node = event["metadata"]["langgraph_node"]
+            # if chunk.content and langgraph_node != "router":
+            #     logger.info(chunk)
             # --- 场景 2: 捕获工具调用 (可选，用于调试或前端展示 loading) ---
             elif kind == "on_tool_start":
                 # tool_name = event["name"]
