@@ -96,7 +96,13 @@ assistants_mysql_engine = create_async_engine(
 )
 # logger.info(">>> 已加载 ASSISTANTS MySQL Engine")
 
-async_session_maker = async_sessionmaker(
+pms_async_session_maker = async_sessionmaker(
+    bind=pms_mysql_engine,  # 绑定上面的引擎
+    class_=AsyncSession,  # 指定生成的 Session 类型是异步的
+    expire_on_commit=False  # 【关键点】提交后不立刻过期
+)
+
+assistants_async_session_maker = async_sessionmaker(
     bind=assistants_mysql_engine,  # 绑定上面的引擎
     class_=AsyncSession,  # 指定生成的 Session 类型是异步的
     expire_on_commit=False  # 【关键点】提交后不立刻过期
@@ -130,7 +136,7 @@ async_session_maker = async_sessionmaker(
 
 @asynccontextmanager
 async def db_session():
-    async with async_session_maker() as session:
+    async with assistants_async_session_maker() as session:
         try:
             yield session
             await session.commit()

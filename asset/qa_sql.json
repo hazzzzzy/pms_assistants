@@ -5,8 +5,8 @@
     "remark": "该sql只适配于查询酒店在特定日期的营收、利润或收益数据（最后需合计金额）且为单一时间维度查询，如今日、昨日、前日或某一天等，可自行延伸"
   },
   {
-    "q": "今日、昨天、前天、某天酒店的房态（预订、空房、入住）数据",
-    "a": "只给出涉及的表不给出sql，可能涉及的表：tb_order_room、tb_room_type、tb_room。",
-    "remark": "该sql只适配于查询酒店在特定日期的房态数据且为单一时间维度查询，如今日、昨日、前日或某一天等，可自行延伸"
+    "q": "今日、昨天、前天、某天酒店的房态（在住、取消入住、预订取消、预订中、离店已结账、离店未结账、已超时、房单被删除等状态）数据",
+    "a": "SELECT rt.`name`, COUNT(orm.id) FROM `tb_order_room` orm JOIN tb_room_type rt ON orm.room_type_id = rt.id WHERE DATE(orm.inTime) = '{对应日期}' AND orm.hotel_id = {对应酒店} AND orm.state = {房单状态} GROUP BY orm.room_type_id, rt.`name`;",
+    "remark": "该sql只适配于查询酒店在特定日期的房态数据且为单一时间维度查询，如今日、昨日、前日或某一天等，如用户有额外问题，可在了解表结构之后自行拓展延伸"
   }
 ]

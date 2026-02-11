@@ -9,12 +9,12 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, text
 
 from config.config import settings
 from core.agent_context import AgentContext
 from core.agent_prompt import USER_PROMPT, TITLE_GENERATE_SYSTEM_PROMPT, ROUTER_PROMPT
-from core.db import db_session, async_session_maker
+from core.db import db_session, assistants_async_session_maker, pms_async_session_maker
 from db_models.models import ChatHistory, UserThread, PresetQuestion
 from utils.R import R
 from utils.abs_path import abs_path
@@ -32,7 +32,7 @@ async def parse_excel(file):
 
             content = await file.read()
             if len(content) > settings.MAX_FILE_SIZE_BYTES:
-                raise Exception(f"文件实际大小超过限制 ({settings.MAX_FILE_SIZE_BYTES} MB)")
+                raise Exception(f"文件实际大小超过限制 ({settings.MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB)")
 
             # 解析 Excel
             df = pd.read_excel(io.BytesIO(content))
@@ -41,7 +41,7 @@ async def parse_excel(file):
 
             file_context = f"用户上传的文件内容:\n{file_md}\n"
     except Exception as e:
-        err = e
+        err = str(e)
     return file_name, file_context, err
 
 
@@ -117,7 +117,7 @@ async def chat(ctx: AgentContext, file, question, thread_id, hotel_id, user_id):
         # 存储进数据库
         history_id = None
         if ai_output:
-            async with async_session_maker() as session:
+            async with assistants_async_session_maker() as session:
                 new_history = ChatHistory(question=question, answer=ai_output, thread_id=thread_id, file_name=file_name)
 
                 session.add(new_history)
@@ -260,3 +260,32 @@ async def get_preset_question(limit: int = 10, page: int = 1):
             'data': preset_question,
             'total_count': total_count
         })
+
+
+async def get_all_user():
+    # 阶段 1：获取去重后的 user_id
+    async with assistants_async_session_maker() as session:
+        all_user_stmt = select(UserThread.user_id).distinct()
+        result = await session.execute(all_user_stmt)
+        all_user = result.scalars().all()
+
+    if not all_user:
+        return R.success({'data': [], 'total_count': 0})
+
+    # 阶段 2：跨库查询 staff 信息
+    async with pms_async_session_maker() as pms_session:
+        # 使用 text() 并通过参数绑定防止注入
+        # 注意：部分驱动支持 tuple(all_user) 直接映射到 IN (:ids)
+        sql = text("SELECT id, name FROM tb_staff WHERE id IN :user_ids")
+        pms_result = await pms_session.execute(sql, {"user_ids": tuple(all_user)})
+
+        # 转换为字典列表
+        staff_list = [
+            {"id": row.id, "name": row.name}
+            for row in pms_result.mappings()
+        ]
+
+    return R.success({
+        'data': staff_list,
+        'total_count': len(staff_list)
+    })

@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from core.agent_context import AgentContext
 from schemas.pms_agent_schema import DrawRequest, FeedbackRequest, HistoryTableResponse, HistoryTableRequest, HistoryFeedRequest, \
-    HistoryFeedResponse, ThreadResponse, ThreadRequest, PresetQuestionResponse, PresetQuestionRequest
+    HistoryFeedResponse, ThreadResponse, ThreadRequest, PresetQuestionResponse, PresetQuestionRequest, AllUserResponse
 from service import pms_agent_service
 from utils.R import BaseResponse
 
@@ -57,3 +57,8 @@ async def get_user_thread(req: ThreadRequest = Query()):
 @agent_router.get('/get_preset_question', response_model=BaseResponse[PresetQuestionResponse], summary='获取预设问题列表')
 async def get_preset_question(req: PresetQuestionRequest = Query()):
     return await pms_agent_service.get_preset_question(limit=req.limit, page=req.page)
+
+
+@agent_router.get('/get_all_user', response_model=BaseResponse[AllUserResponse], summary='获取全部使用过的用户信息')
+async def get_all_user():
+    return await pms_agent_service.get_all_user()

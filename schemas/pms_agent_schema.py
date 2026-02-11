@@ -143,6 +143,13 @@ class PresetQuestionSchema(BaseModel):
     content: str
 
 
+class AllUserSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+
+
 # =======================
 # 3. 响应参数 (Response)
 # =======================
@@ -164,4 +171,9 @@ class ThreadResponse(BaseModel):
 
 class PresetQuestionResponse(BaseModel):
     data: List[PresetQuestionSchema]
+    total_count: int
+
+
+class AllUserResponse(BaseModel):
+    data: List[AllUserSchema]
     total_count: int
